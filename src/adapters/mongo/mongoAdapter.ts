@@ -9,7 +9,11 @@ import {
 import { DatabaseAdapter } from "../adapter";
 import { MongoModel } from "./mongoModel";
 import { ChangeEvent, ModelSchema, MongoConfig } from "../../types";
-import { ConfigurationError, ConnectionError } from "../../errors";
+import {
+  ConfigurationError,
+  ConnectionError,
+  QueryError,
+} from "../../errors";
 import { Logger, noopLogger } from "../../logger";
 
 /**
@@ -121,6 +125,16 @@ export class MongoAdapter extends DatabaseAdapter {
       default:
         return null;
     }
+  }
+
+  public async raw(query: unknown, _params?: unknown[]): Promise<unknown> {
+    if (!this.db) {
+      throw new ConnectionError("MongoAdapter is not connected");
+    }
+    if (query === null || typeof query !== "object" || Array.isArray(query)) {
+      throw new QueryError("MongoDB raw() expects a command document");
+    }
+    return this.db.command(query as Document);
   }
 
   public async disconnect(): Promise<void> {

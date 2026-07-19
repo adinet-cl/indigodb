@@ -139,6 +139,27 @@ describe("PostgresAdapter", () => {
     expect(pool.end).toHaveBeenCalled();
   });
 
+  test("raw executes SQL through the pool and rejects non-strings", async () => {
+    const adapter = new PostgresAdapter(config);
+    await adapter.connect();
+    const pool = lastInstance(Pool);
+    pool.query.mockResolvedValue({ rows: [{ ok: 1 }], rowCount: 1 });
+
+    const result = await adapter.raw("SELECT $1::int AS ok", [1]);
+
+    expect(pool.query).toHaveBeenCalledWith("SELECT $1::int AS ok", [1]);
+    expect(result).toEqual({ rows: [{ ok: 1 }], rowCount: 1 });
+
+    await expect(adapter.raw({ not: "sql" })).rejects.toThrow(
+      "expects a SQL string"
+    );
+  });
+
+  test("raw throws when not connected", async () => {
+    const adapter = new PostgresAdapter(config);
+    await expect(adapter.raw("SELECT 1")).rejects.toThrow("not connected");
+  });
+
   test("connect releases the pool if the listener fails to connect", async () => {
     (Client as unknown as jest.Mock).mockImplementationOnce(() => {
       const client = new EventEmitter() as MockInstance;

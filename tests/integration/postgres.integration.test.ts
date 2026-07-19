@@ -89,4 +89,48 @@ describeIntegration("PostgreSQL integration", () => {
       expect.arrayContaining(["INSERT", "UPDATE", "DELETE"])
     );
   });
+
+  test("query engine round-trip: operators, orderBy, pagination and bulk ops", async () => {
+    const users = model as unknown as {
+      createMany(data: object[]): Promise<TestUser[]>;
+      findAll(where?: object, options?: object): Promise<TestUser[]>;
+      findOne(where?: object): Promise<TestUser | null>;
+      count(where?: object): Promise<number>;
+      updateMany(where: object, data: object): Promise<number>;
+      deleteMany(where: object): Promise<number>;
+    };
+    const stamp = Date.now();
+
+    const created = await users.createMany([
+      { name: "qe_alpha", email: `qe-a-${stamp}@example.com` },
+      { name: "qe_beta", email: `qe-b-${stamp}@example.com` },
+      { name: "qe_gamma", email: `qe-c-${stamp}@example.com` },
+    ]);
+    expect(created).toHaveLength(3);
+
+    const matched = await users.findAll(
+      { name: { $like: "qe\\_%" }, email: { $like: `%-${stamp}@%` } },
+      { orderBy: { name: "desc" }, limit: 2 }
+    );
+    expect(matched.map((u) => u.name)).toEqual(["qe_gamma", "qe_beta"]);
+
+    const total = await users.count({ email: { $like: `%-${stamp}@%` } });
+    expect(total).toBe(3);
+
+    const one = await users.findOne({
+      $or: [{ name: "qe_alpha" }, { name: "does_not_exist" }],
+    });
+    expect(one?.name).toBe("qe_alpha");
+
+    const renamed = await users.updateMany(
+      { name: { $in: ["qe_alpha", "qe_beta"] } },
+      { name: "qe_renamed" }
+    );
+    expect(renamed).toBe(2);
+
+    const removed = await users.deleteMany({
+      email: { $like: `%-${stamp}@%` },
+    });
+    expect(removed).toBe(3);
+  });
 });

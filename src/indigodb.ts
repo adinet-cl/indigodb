@@ -80,6 +80,17 @@ export class IndigoDB extends EventEmitter {
     return this.adapter.defineModel<T>(name, schema);
   }
 
+  /**
+   * Native escape hatch. PostgreSQL: `db.raw("SELECT ...", [params])`.
+   * MongoDB: `db.raw({ ping: 1 })` (a command document).
+   */
+  public async raw(query: unknown, params?: unknown[]): Promise<unknown> {
+    if (!this.connected) {
+      throw new ConnectionError("Call connect() before running raw queries");
+    }
+    return this.adapter.raw(query, params);
+  }
+
   public async close(): Promise<void> {
     await this.gateway?.stop();
     await this.adapter.disconnect();

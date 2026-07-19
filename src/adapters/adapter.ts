@@ -15,6 +15,11 @@ export abstract class DatabaseAdapter extends EventEmitter {
     name: string,
     schema: ModelSchema
   ): Promise<BaseModel<T>>;
+  /**
+   * Native escape hatch. PostgreSQL: a SQL string + parameter values.
+   * MongoDB: a command document (params ignored).
+   */
+  public abstract raw(query: unknown, params?: unknown[]): Promise<unknown>;
 
   protected emitChange(event: ChangeEvent): void {
     this.emit("change", event);

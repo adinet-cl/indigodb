@@ -2,12 +2,21 @@ import type { Pool } from "pg";
 import { BaseModel } from "../../models/baseModel";
 import { ModelSchema } from "../../types";
 import { POSTGRES_TYPE_MAP } from "../../dataTypes";
-import { UnsupportedTypeError } from "../../errors";
+import { QueryError, UnsupportedTypeError } from "../../errors";
 import { NOTIFICATION_CHANNEL } from "./constants";
+import {
+  assertNonNegativeInteger,
+  QueryOptions,
+  Where,
+} from "../../query/where";
+import { compileWhere } from "./whereCompiler";
 
 /** Minimal query surface the model needs; satisfied by pg.Pool. */
 export interface QueryExecutor {
-  query(text: string, values?: unknown[]): Promise<{ rows: unknown[] }>;
+  query(
+    text: string,
+    values?: unknown[]
+  ): Promise<{ rows: unknown[]; rowCount?: number | null }>;
 }
 
 /**
@@ -113,23 +122,152 @@ export class PostgresModel<T> extends BaseModel<T> {
     return result.rows[0] as T;
   }
 
-  public async findAll(criteria: Partial<T> = {}): Promise<T[]> {
-    this.assertKnownColumns(criteria as Record<string, unknown>);
+  public async findAll(
+    where: Where<T> = {},
+    options: QueryOptions<T> = {}
+  ): Promise<T[]> {
+    const { sql, values } = this.buildSelect("*", where, options);
+    const result = await this.pool.query(sql, values);
+    return result.rows as T[];
+  }
 
-    const entries = Object.entries(criteria as Record<string, unknown>);
-    let query = `SELECT * FROM ${quote(this.name)}`;
-    const values: unknown[] = [];
+  public async findOne(
+    where: Where<T> = {},
+    options: QueryOptions<T> = {}
+  ): Promise<T | null> {
+    const rows = await this.findAll(where, { ...options, limit: 1 });
+    return rows[0] ?? null;
+  }
 
-    if (entries.length > 0) {
-      const whereClauses = entries.map(([key, value], index) => {
-        values.push(value);
-        return `${quote(key)} = $${index + 1}`;
-      });
-      query += ` WHERE ${whereClauses.join(" AND ")}`;
+  public async count(where: Where<T> = {}): Promise<number> {
+    const { sql, values } = this.buildSelect("COUNT(*)::int AS count", where, {});
+    const result = await this.pool.query(sql, values);
+    const row = result.rows[0] as { count: number } | undefined;
+    return Number(row?.count ?? 0);
+  }
+
+  public async exists(where: Where<T> = {}): Promise<boolean> {
+    const { sql, values } = this.buildSelect("1 AS one", where, { limit: 1 });
+    const result = await this.pool.query(sql, values);
+    return result.rows.length > 0;
+  }
+
+  public async createMany(data: Partial<T>[]): Promise<T[]> {
+    if (data.length === 0) return [];
+
+    const first = data[0] as Record<string, unknown>;
+    this.assertKnownColumns(first);
+    const columns = Object.keys(first);
+    if (columns.length === 0) {
+      throw new QueryError("createMany rows must have at least one column");
     }
 
-    const result = await this.pool.query(query, values);
+    const values: unknown[] = [];
+    const rowsSql = data.map((row) => {
+      const record = row as Record<string, unknown>;
+      const keys = Object.keys(record);
+      if (
+        keys.length !== columns.length ||
+        !columns.every((column) => column in record)
+      ) {
+        throw new QueryError(
+          "createMany requires every row to have the same columns"
+        );
+      }
+      const placeholders = columns.map((column) => {
+        values.push(record[column]);
+        return `$${values.length}`;
+      });
+      return `(${placeholders.join(", ")})`;
+    });
+
+    const columnList = columns.map((column) => quote(column)).join(", ");
+    const result = await this.pool.query(
+      `INSERT INTO ${quote(this.name)} (${columnList}) VALUES ${rowsSql.join(", ")} RETURNING *;`,
+      values
+    );
     return result.rows as T[];
+  }
+
+  public async updateMany(where: Where<T>, data: Partial<T>): Promise<number> {
+    this.assertKnownColumns(data as Record<string, unknown>);
+    this.assertKnownWhereColumns(where as Record<string, unknown>);
+
+    const entries = Object.entries(data as Record<string, unknown>);
+    if (entries.length === 0) return 0;
+
+    const values = entries.map(([, value]) => value);
+    const updates = entries.map(
+      ([key], index) => `${quote(key)} = $${index + 1}`
+    );
+
+    const compiled = compileWhere(
+      where as Record<string, unknown>,
+      quote,
+      values.length + 1
+    );
+    values.push(...compiled.values);
+
+    let sql = `UPDATE ${quote(this.name)} SET ${updates.join(", ")}`;
+    if (compiled.sql) sql += ` WHERE ${compiled.sql}`;
+
+    const result = await this.pool.query(sql, values);
+    return result.rowCount ?? 0;
+  }
+
+  public async deleteMany(where: Where<T>): Promise<number> {
+    this.assertKnownWhereColumns(where as Record<string, unknown>);
+    const compiled = compileWhere(where as Record<string, unknown>, quote);
+
+    let sql = `DELETE FROM ${quote(this.name)}`;
+    if (compiled.sql) sql += ` WHERE ${compiled.sql}`;
+
+    const result = await this.pool.query(sql, compiled.values);
+    return result.rowCount ?? 0;
+  }
+
+  /** Shared SELECT builder: WHERE + ORDER BY + LIMIT/OFFSET, all parameterized. */
+  private buildSelect(
+    defaultProjection: string,
+    where: Where<T>,
+    options: QueryOptions<T>
+  ): { sql: string; values: unknown[] } {
+    this.assertKnownWhereColumns(where as Record<string, unknown>);
+    this.assertKnownOptionColumns(options);
+
+    const projection = options.select?.length
+      ? options.select.map((column) => quote(column)).join(", ")
+      : defaultProjection;
+
+    const compiled = compileWhere(where as Record<string, unknown>, quote);
+    const values = [...compiled.values];
+
+    let sql = `SELECT ${projection} FROM ${quote(this.name)}`;
+    if (compiled.sql) sql += ` WHERE ${compiled.sql}`;
+
+    const orderEntries = Object.entries(options.orderBy ?? {});
+    if (orderEntries.length > 0) {
+      const orderSql = orderEntries.map(([column, direction]) => {
+        if (direction !== "asc" && direction !== "desc") {
+          throw new QueryError(
+            `orderBy direction must be "asc" or "desc", got "${String(direction)}"`
+          );
+        }
+        return `${quote(column)} ${direction === "asc" ? "ASC" : "DESC"}`;
+      });
+      sql += ` ORDER BY ${orderSql.join(", ")}`;
+    }
+
+    if (options.limit !== undefined) {
+      values.push(assertNonNegativeInteger(options.limit, "limit"));
+      sql += ` LIMIT $${values.length}`;
+    }
+    if (options.offset !== undefined) {
+      values.push(assertNonNegativeInteger(options.offset, "offset"));
+      sql += ` OFFSET $${values.length}`;
+    }
+
+    return { sql, values };
   }
 
   public async findById(id: unknown): Promise<T | null> {
