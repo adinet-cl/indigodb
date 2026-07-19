@@ -113,7 +113,7 @@ describe("PostgresAdapter", () => {
 
     const pool = lastInstance(Pool);
     const statements = pool.query.mock.calls.map((call) => call[0] as string);
-    expect(statements.some((sql) => sql.includes("CREATE TABLE IF NOT EXISTS users"))).toBe(true);
+    expect(statements.some((sql) => sql.includes('CREATE TABLE IF NOT EXISTS "users"'))).toBe(true);
     expect(statements.some((sql) => sql.includes("CREATE TRIGGER"))).toBe(true);
   });
 

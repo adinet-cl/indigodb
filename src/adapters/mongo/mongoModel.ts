@@ -2,6 +2,20 @@ import { Collection, Document, Filter, ObjectId } from "mongodb";
 import { BaseModel } from "../../models/baseModel";
 import { ModelSchema } from "../../types";
 
+/** Parses booleans without JS's `Boolean("false") === true` footgun. */
+function toBoolean(value: unknown): boolean {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "true" || normalized === "1") return true;
+    if (normalized === "false" || normalized === "0" || normalized === "") {
+      return false;
+    }
+  }
+  return Boolean(value);
+}
+
 export class MongoModel<T> extends BaseModel<T> {
   constructor(
     name: string,
@@ -33,7 +47,7 @@ export class MongoModel<T> extends BaseModel<T> {
       } else if (type === "INTEGER" || type === "FLOAT") {
         coerced[key] = Number(value);
       } else if (type === "BOOLEAN") {
-        coerced[key] = Boolean(value);
+        coerced[key] = toBoolean(value);
       } else if (type === "DATE" && !(value instanceof Date)) {
         coerced[key] = new Date(value as string | number);
       } else {
@@ -46,7 +60,11 @@ export class MongoModel<T> extends BaseModel<T> {
   public async create(data: Partial<T>): Promise<T> {
     const document = this.coerceTypes(data as Record<string, unknown>);
     const result = await this.collection.insertOne(document);
-    const inserted = await this.findById(result.insertedId);
+    // Re-read by the driver-assigned _id, not the (possibly custom) primary
+    // key, which may not be populated on the just-inserted document.
+    const inserted = await this.collection.findOne({
+      _id: result.insertedId,
+    } as Filter<Document>);
     return inserted as T;
   }
 

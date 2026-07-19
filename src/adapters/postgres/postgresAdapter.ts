@@ -44,6 +44,15 @@ export class PostgresAdapter extends DatabaseAdapter {
   }
 
   private async startListener(): Promise<void> {
+    // Drop any previous (likely errored) client before replacing it, so
+    // reconnect cycles don't accumulate abandoned clients and listeners.
+    if (this.listenClient) {
+      const previous = this.listenClient;
+      this.listenClient = undefined;
+      previous.removeAllListeners();
+      await previous.end().catch(() => undefined);
+    }
+
     const client = new Client(this.connectionOptions());
     this.listenClient = client;
 

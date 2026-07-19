@@ -105,6 +105,19 @@ describe("IndigoDB", () => {
     expect(firstAdapter().disconnect).toHaveBeenCalled();
   });
 
+  test("connect rolls back the adapter if the gateway fails to start", async () => {
+    const db = new IndigoDB({ ...pgConfig, realtime: { enabled: true } });
+    firstGateway().start.mockRejectedValueOnce(new Error("EADDRINUSE"));
+
+    await expect(db.connect()).rejects.toThrow("EADDRINUSE");
+
+    expect(firstAdapter().connect).toHaveBeenCalled();
+    expect(firstAdapter().disconnect).toHaveBeenCalled();
+    await expect(
+      db.defineModel("users", { id: { type: DataTypes.INTEGER, primaryKey: true } })
+    ).rejects.toThrow(ConnectionError);
+  });
+
   test("defineModel requires connect() first", async () => {
     const db = new IndigoDB(pgConfig);
     await expect(

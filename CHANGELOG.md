@@ -50,6 +50,17 @@ breaking API changes.
   crashing the process.
 - `ws` moved from `devDependencies` to `dependencies` so the published package
   works when installed.
+- SQL identifiers (table/column names) are now double-quoted, so reserved words
+  (`user`, `order`, `end`, ...) and case-sensitive names are valid.
+- MongoDB `BOOLEAN` coercion no longer turns the strings `"false"`/`"0"` into
+  `true`.
+- MongoDB `create()` re-reads the inserted document by its `_id` instead of the
+  declared primary key, so a custom primary key no longer returns `null`.
+- Redefining a MongoDB model reuses the existing handle instead of opening a
+  second change stream (which double-broadcast every change).
+- `connect()` rolls back the database connection if the WebSocket gateway fails
+  to start, and the Postgres listener reconnect no longer leaks the previous
+  client.
 
 ### Removed
 

@@ -10,6 +10,15 @@ export interface QueryExecutor {
   query(text: string, values?: unknown[]): Promise<{ rows: unknown[] }>;
 }
 
+/**
+ * Double-quotes an identifier so reserved words (user, order, end, ...) and
+ * case-sensitive names are valid SQL. The name is already validated by
+ * assertValidIdentifier, so it cannot contain a quote to escape.
+ */
+function quote(identifier: string): string {
+  return `"${identifier}"`;
+}
+
 export class PostgresModel<T> extends BaseModel<T> {
   private readonly pool: QueryExecutor;
 
@@ -32,7 +41,7 @@ export class PostgresModel<T> extends BaseModel<T> {
       if (!sqlType) {
         throw new UnsupportedTypeError(columnProps.type);
       }
-      let columnDef = `${columnName} ${sqlType}`;
+      let columnDef = `${quote(columnName)} ${sqlType}`;
       if (columnProps.autoIncrement) columnDef += " GENERATED ALWAYS AS IDENTITY";
       if (columnProps.primaryKey) columnDef += " PRIMARY KEY";
       if (columnProps.unique) columnDef += " UNIQUE";
@@ -40,13 +49,14 @@ export class PostgresModel<T> extends BaseModel<T> {
     }
 
     await this.pool.query(
-      `CREATE TABLE IF NOT EXISTS ${this.name} (${columns.join(", ")});`
+      `CREATE TABLE IF NOT EXISTS ${quote(this.name)} (${columns.join(", ")});`
     );
   }
 
   private async setupTriggers(): Promise<void> {
-    const functionName = `notify_${this.name}_change`;
-    const triggerName = `${this.name}_change_trigger`;
+    const functionName = quote(`notify_${this.name}_change`);
+    const triggerName = quote(`${this.name}_change_trigger`);
+    const table = quote(this.name);
 
     const createFunctionQuery = `
       CREATE OR REPLACE FUNCTION ${functionName}() RETURNS trigger AS $$
@@ -71,9 +81,9 @@ export class PostgresModel<T> extends BaseModel<T> {
     `;
 
     const createTriggerQuery = `
-      DROP TRIGGER IF EXISTS ${triggerName} ON ${this.name};
+      DROP TRIGGER IF EXISTS ${triggerName} ON ${table};
       CREATE TRIGGER ${triggerName}
-      AFTER INSERT OR UPDATE OR DELETE ON ${this.name}
+      AFTER INSERT OR UPDATE OR DELETE ON ${table}
       FOR EACH ROW EXECUTE FUNCTION ${functionName}();
     `;
 
@@ -87,17 +97,17 @@ export class PostgresModel<T> extends BaseModel<T> {
 
     if (entries.length === 0) {
       const result = await this.pool.query(
-        `INSERT INTO ${this.name} DEFAULT VALUES RETURNING *;`
+        `INSERT INTO ${quote(this.name)} DEFAULT VALUES RETURNING *;`
       );
       return result.rows[0] as T;
     }
 
-    const columns = entries.map(([key]) => key).join(", ");
+    const columns = entries.map(([key]) => quote(key)).join(", ");
     const values = entries.map(([, value]) => value);
     const placeholders = values.map((_, index) => `$${index + 1}`).join(", ");
 
     const result = await this.pool.query(
-      `INSERT INTO ${this.name} (${columns}) VALUES (${placeholders}) RETURNING *;`,
+      `INSERT INTO ${quote(this.name)} (${columns}) VALUES (${placeholders}) RETURNING *;`,
       values
     );
     return result.rows[0] as T;
@@ -107,13 +117,13 @@ export class PostgresModel<T> extends BaseModel<T> {
     this.assertKnownColumns(criteria as Record<string, unknown>);
 
     const entries = Object.entries(criteria as Record<string, unknown>);
-    let query = `SELECT * FROM ${this.name}`;
+    let query = `SELECT * FROM ${quote(this.name)}`;
     const values: unknown[] = [];
 
     if (entries.length > 0) {
       const whereClauses = entries.map(([key, value], index) => {
         values.push(value);
-        return `${key} = $${index + 1}`;
+        return `${quote(key)} = $${index + 1}`;
       });
       query += ` WHERE ${whereClauses.join(" AND ")}`;
     }
@@ -124,7 +134,7 @@ export class PostgresModel<T> extends BaseModel<T> {
 
   public async findById(id: unknown): Promise<T | null> {
     const result = await this.pool.query(
-      `SELECT * FROM ${this.name} WHERE ${this.primaryKey} = $1;`,
+      `SELECT * FROM ${quote(this.name)} WHERE ${quote(this.primaryKey)} = $1;`,
       [id]
     );
     return (result.rows[0] as T) ?? null;
@@ -138,12 +148,14 @@ export class PostgresModel<T> extends BaseModel<T> {
       return this.findById(id);
     }
 
-    const updates = entries.map(([key], index) => `${key} = $${index + 1}`);
+    const updates = entries.map(
+      ([key], index) => `${quote(key)} = $${index + 1}`
+    );
     const values = entries.map(([, value]) => value);
     values.push(id);
 
     const result = await this.pool.query(
-      `UPDATE ${this.name} SET ${updates.join(", ")} WHERE ${this.primaryKey} = $${values.length} RETURNING *;`,
+      `UPDATE ${quote(this.name)} SET ${updates.join(", ")} WHERE ${quote(this.primaryKey)} = $${values.length} RETURNING *;`,
       values
     );
     return (result.rows[0] as T) ?? null;
@@ -151,7 +163,7 @@ export class PostgresModel<T> extends BaseModel<T> {
 
   public async delete(id: unknown): Promise<T | null> {
     const result = await this.pool.query(
-      `DELETE FROM ${this.name} WHERE ${this.primaryKey} = $1 RETURNING *;`,
+      `DELETE FROM ${quote(this.name)} WHERE ${quote(this.primaryKey)} = $1 RETURNING *;`,
       [id]
     );
     return (result.rows[0] as T) ?? null;

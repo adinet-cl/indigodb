@@ -52,19 +52,37 @@ describe("PostgresModel", () => {
     await model.init();
 
     const createTableSql = pool.query.mock.calls[0][0] as string;
-    expect(createTableSql).toContain("CREATE TABLE IF NOT EXISTS users");
+    expect(createTableSql).toContain('CREATE TABLE IF NOT EXISTS "users"');
     expect(createTableSql).toContain(
-      "id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY"
+      '"id" INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY'
     );
-    expect(createTableSql).toContain("name VARCHAR(255)");
-    expect(createTableSql).toContain("email VARCHAR(255) UNIQUE");
+    expect(createTableSql).toContain('"name" VARCHAR(255)');
+    expect(createTableSql).toContain('"email" VARCHAR(255) UNIQUE');
 
     const functionSql = pool.query.mock.calls[1][0] as string;
-    expect(functionSql).toContain("notify_users_change");
+    expect(functionSql).toContain('"notify_users_change"');
     expect(functionSql).toContain("pg_notify('indigodb_changes'");
 
     const triggerSql = pool.query.mock.calls[2][0] as string;
-    expect(triggerSql).toContain("users_change_trigger");
+    expect(triggerSql).toContain('"users_change_trigger"');
+    expect(triggerSql).toContain('ON "users"');
+  });
+
+  test("quotes identifiers so reserved words are valid SQL", async () => {
+    const pool = makePool();
+    // "order" and "end" are reserved words; unquoted they break CREATE TABLE.
+    const model = new PostgresModel(
+      "order",
+      {
+        id: { type: DataTypes.INTEGER, primaryKey: true },
+        end: { type: DataTypes.DATE },
+      },
+      pool
+    );
+    await model.init();
+    const createTableSql = pool.query.mock.calls[0][0] as string;
+    expect(createTableSql).toContain('CREATE TABLE IF NOT EXISTS "order"');
+    expect(createTableSql).toContain('"end" TIMESTAMP');
   });
 
   test("init throws for unsupported data types", async () => {
@@ -83,7 +101,7 @@ describe("PostgresModel", () => {
     const result = await model.create({ name: "Ada", email: "ada@example.com" });
 
     expect(pool.query).toHaveBeenCalledWith(
-      "INSERT INTO users (name, email) VALUES ($1, $2) RETURNING *;",
+      'INSERT INTO "users" ("name", "email") VALUES ($1, $2) RETURNING *;',
       ["Ada", "ada@example.com"]
     );
     expect(result).toEqual(row);
@@ -100,7 +118,7 @@ describe("PostgresModel", () => {
     const pool = makePool([]);
     const model = new PostgresModel<User>("users", userSchema, pool);
     await model.findAll();
-    expect(pool.query).toHaveBeenCalledWith("SELECT * FROM users", []);
+    expect(pool.query).toHaveBeenCalledWith('SELECT * FROM "users"', []);
   });
 
   test("findAll builds parameterized WHERE clauses", async () => {
@@ -108,7 +126,7 @@ describe("PostgresModel", () => {
     const model = new PostgresModel<User>("users", userSchema, pool);
     await model.findAll({ name: "Ada", email: "ada@example.com" });
     expect(pool.query).toHaveBeenCalledWith(
-      "SELECT * FROM users WHERE name = $1 AND email = $2",
+      'SELECT * FROM "users" WHERE "name" = $1 AND "email" = $2',
       ["Ada", "ada@example.com"]
     );
   });
@@ -127,19 +145,19 @@ describe("PostgresModel", () => {
 
     await model.findById(7);
     expect(pool.query).toHaveBeenLastCalledWith(
-      "SELECT * FROM users WHERE id = $1;",
+      'SELECT * FROM "users" WHERE "id" = $1;',
       [7]
     );
 
     await model.update(7, { name: "Grace" });
     expect(pool.query).toHaveBeenLastCalledWith(
-      "UPDATE users SET name = $1 WHERE id = $2 RETURNING *;",
+      'UPDATE "users" SET "name" = $1 WHERE "id" = $2 RETURNING *;',
       ["Grace", 7]
     );
 
     await model.delete(7);
     expect(pool.query).toHaveBeenLastCalledWith(
-      "DELETE FROM users WHERE id = $1 RETURNING *;",
+      'DELETE FROM "users" WHERE "id" = $1 RETURNING *;',
       [7]
     );
   });

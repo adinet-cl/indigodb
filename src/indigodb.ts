@@ -59,7 +59,14 @@ export class IndigoDB extends EventEmitter {
 
   public async connect(): Promise<void> {
     await this.adapter.connect();
-    await this.gateway?.start();
+    try {
+      await this.gateway?.start();
+    } catch (err) {
+      // Roll back the adapter connection so a failed gateway (e.g. port in
+      // use) doesn't leak the pool / listen client.
+      await this.adapter.disconnect().catch(() => undefined);
+      throw err;
+    }
     this.connected = true;
   }
 

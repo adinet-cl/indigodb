@@ -60,6 +60,33 @@ describe("MongoModel", () => {
     expect(document.releasedAt).toBeInstanceOf(Date);
   });
 
+  test("BOOLEAN coercion treats string 'false'/'0' as false", async () => {
+    const { model, collection } = makeModel();
+    collection.findOne.mockResolvedValue({ _id: new ObjectId() });
+
+    await model.create({ inStock: "false" as never } as never);
+    expect(collection.insertOne.mock.calls[0][0].inStock).toBe(false);
+
+    await model.create({ inStock: "0" as never } as never);
+    expect(collection.insertOne.mock.calls[1][0].inStock).toBe(false);
+
+    await model.create({ inStock: "true" as never } as never);
+    expect(collection.insertOne.mock.calls[2][0].inStock).toBe(true);
+  });
+
+  test("create re-reads the inserted document by _id, not the primary key", async () => {
+    const { model, collection } = makeModel();
+    const insertedId = new ObjectId();
+    collection.insertOne.mockResolvedValue({ insertedId });
+    const doc = { _id: insertedId, name: "Widget" };
+    collection.findOne.mockResolvedValue(doc);
+
+    const result = await model.create({ name: "Widget" });
+
+    expect(collection.findOne).toHaveBeenCalledWith({ _id: insertedId });
+    expect(result).toEqual(doc);
+  });
+
   test("create rejects fields not in the schema", async () => {
     const { model } = makeModel();
     await expect(

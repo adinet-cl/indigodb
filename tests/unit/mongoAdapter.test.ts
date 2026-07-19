@@ -71,6 +71,27 @@ describe("MongoAdapter", () => {
     });
   });
 
+  test("redefining a model does not open a second change stream", async () => {
+    const adapter = new MongoAdapter(config);
+    await adapter.connect();
+    const schema = { name: { type: DataTypes.STRING } };
+
+    const first = await adapter.defineModel("products", schema);
+    const second = await adapter.defineModel("products", schema);
+
+    expect(mockCollection.watch).toHaveBeenCalledTimes(1);
+    expect(second).toBe(first);
+
+    // A single change must therefore be emitted only once.
+    const events: ChangeEvent[] = [];
+    adapter.on("change", (event: ChangeEvent) => events.push(event));
+    stream.emit("change", {
+      operationType: "insert",
+      fullDocument: { _id: new ObjectId() },
+    });
+    expect(events).toHaveLength(1);
+  });
+
   test("insert events are broadcast as INSERT", async () => {
     const { events } = await connectedAdapterWithModel();
     const doc = { _id: new ObjectId(), name: "Widget" };

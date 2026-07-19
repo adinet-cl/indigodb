@@ -21,6 +21,7 @@ export class MongoAdapter extends DatabaseAdapter {
   private client?: MongoClient;
   private db?: Db;
   private readonly changeStreams: ChangeStream[] = [];
+  private readonly models = new Map<string, MongoModel<unknown>>();
 
   constructor(
     private readonly config: MongoConfig,
@@ -48,8 +49,16 @@ export class MongoAdapter extends DatabaseAdapter {
     if (!this.db) {
       throw new ConnectionError("MongoAdapter is not connected");
     }
-    const model = new MongoModel<T>(name, schema, this.db.collection(name));
-    this.watchCollection(model.name, this.db.collection(model.name));
+    // Redefining a model reuses the existing handle so we never open a second
+    // change stream on the same collection (which would double-broadcast).
+    const collection = this.db.collection(name);
+    const model = new MongoModel<T>(name, schema, collection);
+    const existing = this.models.get(model.name);
+    if (existing) {
+      return existing as MongoModel<T>;
+    }
+    this.models.set(model.name, model as MongoModel<unknown>);
+    this.watchCollection(model.name, collection);
     return model;
   }
 
@@ -117,6 +126,7 @@ export class MongoAdapter extends DatabaseAdapter {
       )
     );
     this.changeStreams.length = 0;
+    this.models.clear();
     if (this.client) {
       await this.client.close();
       this.client = undefined;
