@@ -10,6 +10,7 @@ class MockAdapter extends EventEmitter {
   connect = jest.fn().mockResolvedValue(undefined);
   disconnect = jest.fn().mockResolvedValue(undefined);
   defineModel = jest.fn().mockResolvedValue({ name: "users" });
+  raw = jest.fn().mockResolvedValue({ rows: [] });
   constructor() {
     super();
     adapterMocks.push(this);
@@ -134,6 +135,15 @@ describe("IndigoDB", () => {
 
     expect(firstAdapter().defineModel).toHaveBeenCalledWith("users", schema);
     expect(model).toEqual({ name: "users" });
+  });
+
+  test("raw requires connect() and delegates to the adapter", async () => {
+    const db = new IndigoDB(pgConfig);
+    await expect(db.raw("SELECT 1")).rejects.toThrow(ConnectionError);
+
+    await db.connect();
+    await db.raw("SELECT $1", [1]);
+    expect(firstAdapter().raw).toHaveBeenCalledWith("SELECT $1", [1]);
   });
 
   test("adapter change events are re-emitted and broadcast to the gateway", async () => {

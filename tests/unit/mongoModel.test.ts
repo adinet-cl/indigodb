@@ -22,10 +22,14 @@ const productSchema: ModelSchema = {
 function makeCollection() {
   return {
     insertOne: jest.fn().mockResolvedValue({ insertedId: new ObjectId() }),
+    insertMany: jest.fn().mockResolvedValue({ insertedIds: {} }),
     findOne: jest.fn().mockResolvedValue(null),
     find: jest.fn().mockReturnValue({ toArray: jest.fn().mockResolvedValue([]) }),
     updateOne: jest.fn().mockResolvedValue({ matchedCount: 1 }),
+    updateMany: jest.fn().mockResolvedValue({ modifiedCount: 0 }),
     deleteOne: jest.fn().mockResolvedValue({ deletedCount: 1 }),
+    deleteMany: jest.fn().mockResolvedValue({ deletedCount: 0 }),
+    countDocuments: jest.fn().mockResolvedValue(0),
   };
 }
 
@@ -143,5 +147,140 @@ describe("MongoModel", () => {
 
     expect(collection.deleteOne).toHaveBeenCalledWith({ _id: id });
     expect(result).toEqual(existing);
+  });
+
+  function makeCursor() {
+    const cursor = {
+      sort: jest.fn(),
+      skip: jest.fn(),
+      limit: jest.fn(),
+      project: jest.fn(),
+      toArray: jest.fn().mockResolvedValue([]),
+    };
+    cursor.sort.mockReturnValue(cursor);
+    cursor.skip.mockReturnValue(cursor);
+    cursor.limit.mockReturnValue(cursor);
+    cursor.project.mockReturnValue(cursor);
+    return cursor;
+  }
+
+  test("findAll compiles operators and applies sort/skip/limit/projection", async () => {
+    const collection = makeCollection();
+    const cursor = makeCursor();
+    collection.find.mockReturnValue(cursor);
+    const { model } = makeModel(collection);
+
+    await model.findAll(
+      { price: { $gte: 10, $lt: 100 } },
+      {
+        orderBy: { price: "desc" },
+        offset: 5,
+        limit: 10,
+        select: ["name", "price"],
+      }
+    );
+
+    expect(collection.find).toHaveBeenCalledWith({
+      price: { $gte: 10, $lt: 100 },
+    });
+    expect(cursor.sort).toHaveBeenCalledWith({ price: -1 });
+    expect(cursor.skip).toHaveBeenCalledWith(5);
+    expect(cursor.limit).toHaveBeenCalledWith(10);
+    expect(cursor.project).toHaveBeenCalledWith({ name: 1, price: 1 });
+  });
+
+  test("findAll coerces filter values by schema", async () => {
+    const collection = makeCollection();
+    const cursor = makeCursor();
+    collection.find.mockReturnValue(cursor);
+    const { model } = makeModel(collection);
+
+    await model.findAll({ price: { $gt: "9.99" as never }, inStock: 1 as never });
+
+    expect(collection.find).toHaveBeenCalledWith({
+      price: { $gt: 9.99 },
+      inStock: true,
+    });
+  });
+
+  test("findAll rejects unknown columns anywhere in the tree", async () => {
+    const { model } = makeModel();
+    await expect(
+      model.findAll({ $or: [{ hacked: 1 }] } as never)
+    ).rejects.toThrow(UnknownColumnError);
+  });
+
+  test("count delegates to countDocuments with the compiled filter", async () => {
+    const collection = makeCollection();
+    collection.countDocuments = jest.fn().mockResolvedValue(4);
+    const { model } = makeModel(collection);
+
+    await expect(model.count({ inStock: true })).resolves.toBe(4);
+    expect(collection.countDocuments).toHaveBeenCalledWith({ inStock: true });
+  });
+
+  test("exists uses a minimal projection", async () => {
+    const collection = makeCollection();
+    collection.findOne.mockResolvedValue({ _id: new ObjectId() });
+    const { model } = makeModel(collection);
+
+    await expect(model.exists({ name: "Widget" })).resolves.toBe(true);
+    expect(collection.findOne).toHaveBeenCalledWith(
+      { name: "Widget" },
+      { projection: { _id: 1 } }
+    );
+  });
+
+  test("createMany inserts coerced docs and returns them in input order", async () => {
+    const collection = makeCollection();
+    const idA = new ObjectId();
+    const idB = new ObjectId();
+    collection.insertMany = jest
+      .fn()
+      .mockResolvedValue({ insertedIds: { 0: idA, 1: idB } });
+    const docA = { _id: idA, name: "A" };
+    const docB = { _id: idB, name: "B" };
+    const cursor = makeCursor();
+    // find() returns them out of order on purpose.
+    cursor.toArray.mockResolvedValue([docB, docA]);
+    collection.find.mockReturnValue(cursor);
+    const { model } = makeModel(collection);
+
+    const result = await model.createMany([
+      { name: "A", price: "1" as never },
+      { name: "B" },
+    ]);
+
+    expect(collection.insertMany).toHaveBeenCalledWith([
+      { name: "A", price: 1 },
+      { name: "B" },
+    ]);
+    expect(result).toEqual([docA, docB]);
+  });
+
+  test("updateMany returns modifiedCount", async () => {
+    const collection = makeCollection();
+    collection.updateMany = jest.fn().mockResolvedValue({ modifiedCount: 5 });
+    const { model } = makeModel(collection);
+
+    const affected = await model.updateMany(
+      { inStock: false },
+      { price: "0" as never }
+    );
+
+    expect(collection.updateMany).toHaveBeenCalledWith(
+      { inStock: false },
+      { $set: { price: 0 } }
+    );
+    expect(affected).toBe(5);
+  });
+
+  test("deleteMany returns deletedCount", async () => {
+    const collection = makeCollection();
+    collection.deleteMany = jest.fn().mockResolvedValue({ deletedCount: 2 });
+    const { model } = makeModel(collection);
+
+    await expect(model.deleteMany({ inStock: false })).resolves.toBe(2);
+    expect(collection.deleteMany).toHaveBeenCalledWith({ inStock: false });
   });
 });

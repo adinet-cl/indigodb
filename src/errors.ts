@@ -29,3 +29,5 @@ export class UnknownColumnError extends IndigoDBError {
     super(`Unknown column "${column}" for model "${model}"`);
   }
 }
+
+export class QueryError extends IndigoDBError {}

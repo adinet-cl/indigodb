@@ -119,12 +119,57 @@ The payload shape is identical whether the change originated in PostgreSQL or Mo
 | Method | Description |
 | --- | --- |
 | `create(data)` | Insert a record; returns the created row. |
-| `findAll(criteria?)` | Return all records matching an optional equality filter. |
+| `createMany(data[])` | Bulk insert (single multi-row INSERT / `insertMany`); returns the created rows. |
+| `findAll(where?, options?)` | Query with operators, `orderBy`, `limit`, `offset`, `select`. |
+| `findOne(where?, options?)` | First match or `null`. |
 | `findById(id)` | Return a record by its primary key, or `null`. |
+| `count(where?)` | Number of matching records. |
+| `exists(where?)` | `true` if at least one record matches. |
 | `update(id, data)` | Update by primary key; returns the updated row or `null`. |
+| `updateMany(where, data)` | Bulk update; returns the number of affected records. |
 | `delete(id)` | Delete by primary key; returns the deleted row or `null`. |
+| `deleteMany(where)` | Bulk delete; returns the number of removed records. |
 
 The primary key is taken from the column marked `primaryKey: true` in the schema (PostgreSQL), or defaults to `_id` (MongoDB).
+
+## Querying
+
+Filters use Mongo-style operators on both backends — compiled to parameterized SQL on PostgreSQL, passed (almost) natively to MongoDB. A plain value still means equality:
+
+```typescript
+const results = await Users.findAll(
+  {
+    age: { $gte: 18, $lt: 65 },          // comparisons
+    name: { $like: "A%" },               // SQL LIKE (regex-safe on MongoDB)
+    role: { $in: ["admin", "editor"] },  // membership
+    deletedAt: { $null: true },          // IS NULL
+    $or: [{ plan: "pro" }, { credits: { $gt: 0 } }],
+  },
+  {
+    orderBy: { name: "asc" },
+    limit: 20,
+    offset: 40,
+    select: ["id", "name", "email"],
+  }
+);
+```
+
+Operators: `$eq`, `$ne`, `$gt`, `$gte`, `$lt`, `$lte`, `$in`, `$nin`, `$like`, `$null`, plus `$or` / `$and` combinators. Every column name in a filter is validated against the model schema, and every value is parameterized — unknown columns or malformed operators throw `QueryError` / `UnknownColumnError` before touching the database.
+
+### Raw escape hatch
+
+When the query engine isn't enough:
+
+```typescript
+// PostgreSQL — parameterized SQL:
+const { rows } = (await db.raw(
+  "SELECT name, COUNT(*) FROM users GROUP BY name HAVING COUNT(*) > $1",
+  [1]
+)) as { rows: unknown[] };
+
+// MongoDB — a command document:
+await db.raw({ ping: 1 });
+```
 
 ## Supported data types
 
@@ -184,9 +229,7 @@ v2 is a breaking change. Key differences:
 
 ## Roadmap
 
-- Additional adapters (MySQL, SQLite).
-- Additional real-time gateways (SSE, socket.io).
-- Query builder / richer filtering beyond equality.
+See [ROADMAP.md](./ROADMAP.md) for the full gap analysis and release plan: schema features + hooks (v2.2), transactions (v2.3), migrations (v2.4), advanced real-time (v2.5), and relations (v3.0).
 
 ## Contributing
 

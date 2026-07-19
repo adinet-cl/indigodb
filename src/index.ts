@@ -11,7 +11,14 @@ export {
   UnsupportedTypeError,
   InvalidIdentifierError,
   UnknownColumnError,
+  QueryError,
 } from "./errors";
+export type {
+  FieldOperators,
+  OrderDirection,
+  QueryOptions,
+  Where,
+} from "./query/where";
 export type { Logger } from "./logger";
 export { consoleLogger, noopLogger } from "./logger";
 export type {

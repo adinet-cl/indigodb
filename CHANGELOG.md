@@ -4,6 +4,34 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] - 2026-07-19
+
+Query engine release. Fully backward compatible with v2.0 — plain equality
+filters keep working unchanged.
+
+### Added
+
+- **Filter operators** on both backends: `$eq`, `$ne`, `$gt`, `$gte`, `$lt`,
+  `$lte`, `$in`, `$nin`, `$like`, `$null`, and `$or` / `$and` combinators.
+  Compiled to parameterized SQL on PostgreSQL, passed natively to MongoDB
+  (`$like` becomes an escaped, anchored regex).
+- **Query options** on `findAll` / `findOne`: `orderBy`, `limit`, `offset`,
+  `select` (projection).
+- **New model methods**: `findOne`, `count`, `exists`, `createMany`
+  (single multi-row INSERT on PG), `updateMany`, `deleteMany`.
+- **`db.raw()` escape hatch**: parameterized SQL on PostgreSQL, command
+  documents on MongoDB.
+- `QueryError` error class; `Where`, `FieldOperators`, `QueryOptions`,
+  `OrderDirection` exported types.
+- `ROADMAP.md` with the gap analysis and release plan toward v3.0.
+
+### Security
+
+- Every column referenced in a filter tree (including inside `$or`/`$and`),
+  `orderBy`, and `select` is validated against the model schema before
+  compiling; `limit`/`offset` must be non-negative integers; `$like` patterns
+  are regex-escaped on MongoDB.
+
 ## [2.0.0] - 2026-07-19
 
 Full rewrite around a pluggable adapter architecture. This release contains

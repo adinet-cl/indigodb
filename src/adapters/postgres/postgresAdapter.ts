@@ -3,7 +3,7 @@ import { DatabaseAdapter } from "../adapter";
 import { PostgresModel } from "./postgresModel";
 import { NOTIFICATION_CHANNEL } from "./constants";
 import { ChangeEvent, ModelSchema, PostgresConfig } from "../../types";
-import { ConnectionError } from "../../errors";
+import { ConnectionError, QueryError } from "../../errors";
 import { Logger, noopLogger } from "../../logger";
 
 const LISTENER_RETRY_DELAY_MS = 5000;
@@ -108,6 +108,17 @@ export class PostgresAdapter extends DatabaseAdapter {
     const model = new PostgresModel<T>(name, schema, this.pool);
     await model.init();
     return model;
+  }
+
+  public async raw(query: unknown, params?: unknown[]): Promise<unknown> {
+    if (!this.pool) {
+      throw new ConnectionError("PostgresAdapter is not connected");
+    }
+    if (typeof query !== "string") {
+      throw new QueryError("PostgreSQL raw() expects a SQL string");
+    }
+    const result = await this.pool.query(query, params);
+    return { rows: result.rows, rowCount: result.rowCount };
   }
 
   public async disconnect(): Promise<void> {

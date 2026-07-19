@@ -9,7 +9,10 @@ const mockCollection = {
   deleteOne: jest.fn(),
 };
 
-const mockDb = { collection: jest.fn(() => mockCollection) };
+const mockDb = {
+  collection: jest.fn(() => mockCollection),
+  command: jest.fn(),
+};
 
 jest.mock("mongodb", () => {
   const actual = jest.requireActual("mongodb");
@@ -156,6 +159,19 @@ describe("MongoAdapter", () => {
     const { events } = await connectedAdapterWithModel();
     stream.emit("change", { operationType: "drop" });
     expect(events).toEqual([]);
+  });
+
+  test("raw runs command documents and rejects non-objects", async () => {
+    const adapter = new MongoAdapter(config);
+    await adapter.connect();
+    mockDb.command.mockResolvedValue({ ok: 1 });
+
+    await expect(adapter.raw({ ping: 1 })).resolves.toEqual({ ok: 1 });
+    expect(mockDb.command).toHaveBeenCalledWith({ ping: 1 });
+
+    await expect(adapter.raw("SELECT 1")).rejects.toThrow(
+      "expects a command document"
+    );
   });
 
   test("disconnect closes change streams and the client", async () => {

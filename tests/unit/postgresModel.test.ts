@@ -3,6 +3,7 @@ import { DataTypes } from "../../src/dataTypes";
 import {
   ConfigurationError,
   InvalidIdentifierError,
+  QueryError,
   UnknownColumnError,
   UnsupportedTypeError,
 } from "../../src/errors";
@@ -176,5 +177,151 @@ describe("PostgresModel", () => {
   test("findById returns null when no row matches", async () => {
     const model = new PostgresModel<User>("users", userSchema, makePool([]));
     await expect(model.findById(99)).resolves.toBeNull();
+  });
+
+  test("findAll supports operators, orderBy, limit and offset", async () => {
+    const pool = makePool([]);
+    const model = new PostgresModel<User>("users", userSchema, pool);
+
+    await model.findAll(
+      { name: { $like: "A%" }, id: { $gte: 10 } },
+      { orderBy: { name: "asc", id: "desc" }, limit: 20, offset: 40 }
+    );
+
+    expect(pool.query).toHaveBeenCalledWith(
+      'SELECT * FROM "users" WHERE "name" LIKE $1 AND "id" >= $2 ORDER BY "name" ASC, "id" DESC LIMIT $3 OFFSET $4',
+      ["A%", 10, 20, 40]
+    );
+  });
+
+  test("findAll select projects only the requested columns", async () => {
+    const pool = makePool([]);
+    const model = new PostgresModel<User>("users", userSchema, pool);
+    await model.findAll({}, { select: ["id", "name"] });
+    expect(pool.query).toHaveBeenCalledWith(
+      'SELECT "id", "name" FROM "users"',
+      []
+    );
+  });
+
+  test("findAll rejects unknown columns in where, orderBy and select", async () => {
+    const model = new PostgresModel<User>("users", userSchema, makePool());
+    await expect(
+      model.findAll({ "evil; --": 1 } as never)
+    ).rejects.toThrow(UnknownColumnError);
+    await expect(
+      model.findAll({}, { orderBy: { "evil; --": "asc" } as never })
+    ).rejects.toThrow(UnknownColumnError);
+    await expect(
+      model.findAll({}, { select: ["evil; --"] as never })
+    ).rejects.toThrow(UnknownColumnError);
+  });
+
+  test("findAll validates $or branches too", async () => {
+    const model = new PostgresModel<User>("users", userSchema, makePool());
+    await expect(
+      model.findAll({ $or: [{ "evil; --": 1 }] } as never)
+    ).rejects.toThrow(UnknownColumnError);
+  });
+
+  test("findOne applies limit 1 and unwraps the row", async () => {
+    const row = { id: 1, name: "Ada", email: "a@x.com" };
+    const pool = makePool([row]);
+    const model = new PostgresModel<User>("users", userSchema, pool);
+
+    const result = await model.findOne({ name: "Ada" });
+
+    expect(pool.query).toHaveBeenCalledWith(
+      'SELECT * FROM "users" WHERE "name" = $1 LIMIT $2',
+      ["Ada", 1]
+    );
+    expect(result).toEqual(row);
+  });
+
+  test("count issues COUNT(*) and returns a number", async () => {
+    const pool = makePool([{ count: 7 }]);
+    const model = new PostgresModel<User>("users", userSchema, pool);
+
+    const total = await model.count({ id: { $gt: 0 } });
+
+    expect(pool.query).toHaveBeenCalledWith(
+      'SELECT COUNT(*)::int AS count FROM "users" WHERE "id" > $1',
+      [0]
+    );
+    expect(total).toBe(7);
+  });
+
+  test("exists uses SELECT 1 LIMIT 1", async () => {
+    const pool = makePool([{ one: 1 }]);
+    const model = new PostgresModel<User>("users", userSchema, pool);
+
+    await expect(model.exists({ name: "Ada" })).resolves.toBe(true);
+    expect(pool.query).toHaveBeenCalledWith(
+      'SELECT 1 AS one FROM "users" WHERE "name" = $1 LIMIT $2',
+      ["Ada", 1]
+    );
+
+    const emptyModel = new PostgresModel<User>("users", userSchema, makePool([]));
+    await expect(emptyModel.exists()).resolves.toBe(false);
+  });
+
+  test("createMany builds a single multi-row INSERT", async () => {
+    const rows = [
+      { id: 1, name: "Ada", email: "a@x.com" },
+      { id: 2, name: "Bob", email: "b@x.com" },
+    ];
+    const pool = makePool(rows);
+    const model = new PostgresModel<User>("users", userSchema, pool);
+
+    const result = await model.createMany([
+      { name: "Ada", email: "a@x.com" },
+      { name: "Bob", email: "b@x.com" },
+    ]);
+
+    expect(pool.query).toHaveBeenCalledWith(
+      'INSERT INTO "users" ("name", "email") VALUES ($1, $2), ($3, $4) RETURNING *;',
+      ["Ada", "a@x.com", "Bob", "b@x.com"]
+    );
+    expect(result).toEqual(rows);
+  });
+
+  test("createMany rejects rows with mismatched columns and empty input", async () => {
+    const model = new PostgresModel<User>("users", userSchema, makePool());
+    await expect(
+      model.createMany([{ name: "Ada" }, { email: "b@x.com" }])
+    ).rejects.toThrow(QueryError);
+    await expect(model.createMany([])).resolves.toEqual([]);
+  });
+
+  test("updateMany compiles SET before WHERE and returns rowCount", async () => {
+    const pool = { query: jest.fn().mockResolvedValue({ rows: [], rowCount: 3 }) };
+    const model = new PostgresModel<User>("users", userSchema, pool);
+
+    const affected = await model.updateMany(
+      { id: { $in: [1, 2, 3] } },
+      { name: "Renamed" }
+    );
+
+    expect(pool.query).toHaveBeenCalledWith(
+      'UPDATE "users" SET "name" = $1 WHERE "id" = ANY($2)',
+      ["Renamed", [1, 2, 3]]
+    );
+    expect(affected).toBe(3);
+  });
+
+  test("deleteMany with empty where deletes all and returns rowCount", async () => {
+    const pool = { query: jest.fn().mockResolvedValue({ rows: [], rowCount: 9 }) };
+    const model = new PostgresModel<User>("users", userSchema, pool);
+
+    const removed = await model.deleteMany({});
+
+    expect(pool.query).toHaveBeenCalledWith('DELETE FROM "users"', []);
+    expect(removed).toBe(9);
+  });
+
+  test("limit/offset must be non-negative integers", async () => {
+    const model = new PostgresModel<User>("users", userSchema, makePool());
+    await expect(model.findAll({}, { limit: -1 })).rejects.toThrow(QueryError);
+    await expect(model.findAll({}, { offset: 1.5 })).rejects.toThrow(QueryError);
   });
 });
