@@ -17,7 +17,10 @@ import { Logger, noopLogger } from "./logger";
 
 const DEFAULT_WEBSOCKET_PORT = 8080;
 
-function createAdapter(config: DatabaseConfig, logger: Logger): DatabaseAdapter {
+function createAdapter(
+  config: DatabaseConfig,
+  logger: Logger
+): DatabaseAdapter {
   switch (config.type) {
     case "postgresql":
       return new PostgresAdapter(config, logger);

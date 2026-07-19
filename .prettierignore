@@ -1,0 +1,9 @@
+dist/
+coverage/
+docs/
+node_modules/
+package-lock.json
+CHANGELOG.md
+README.md
+ROADMAP.md
+CLAUDE.md

@@ -30,8 +30,10 @@ end-to-end today.
 
 ## What's missing (the gaps)
 
-- **Tooling**: ESM + CJS dual build, CI, linting, generated API docs. None of
-  these block usage — see "Transversal" below.
+- **Dual ESM + CJS build** — deliberately deferred to v3.1 (owner's call):
+  Node ESM consumers already interop cleanly with the current CJS build, and
+  restructuring the build right before the first full release wasn't worth
+  the breakage risk. Everything else is done.
 
 ## Release plan
 
@@ -76,8 +78,11 @@ end-to-end today.
   `findAll()`, not a native JOIN/`$lookup`. Simpler, identical on both
   backends, and avoids the row-multiplication JOINs cause with `hasMany`.
 
-### Transversal (parallel to any release)
-- Dual ESM + CJS build (`exports` map in package.json).
-- GitHub Actions CI: build + unit tests on every PR; integration suite against
-  service containers.
-- ESLint + Prettier; generated API docs (typedoc) published on releases.
+### Transversal (parallel to any release) ✅ Done (except ESM)
+- GitHub Actions CI ✅ — unit suite on Node 18/20/22 + integration suite
+  against real Postgres 16 and Mongo 7 (single-node replica set) containers
+  on every PR; typedoc docs built as a workflow artifact.
+- ESLint (flat config, typescript-eslint) + Prettier ✅ — `npm run lint`.
+- Generated API docs (typedoc) ✅ — `npm run docs`; published as CI artifact
+  (GitHub Pages hosting left as an optional follow-up).
+- Dual ESM + CJS build — **deferred to v3.1** (see "What's missing").

@@ -75,12 +75,16 @@ export class PostgresModel<T> extends BaseModel<T> {
         throw new UnsupportedTypeError(columnProps.type);
       }
       let columnDef = `${quote(columnName)} ${sqlType}`;
-      if (columnProps.autoIncrement) columnDef += " GENERATED ALWAYS AS IDENTITY";
+      if (columnProps.autoIncrement)
+        columnDef += " GENERATED ALWAYS AS IDENTITY";
       if (columnProps.primaryKey) columnDef += " PRIMARY KEY";
       if (columnProps.unique) columnDef += " UNIQUE";
-      if (columnProps.required && !columnProps.primaryKey) columnDef += " NOT NULL";
+      if (columnProps.required && !columnProps.primaryKey)
+        columnDef += " NOT NULL";
       if (columnProps.references) {
-        const refTable = quote(assertValidIdentifier(columnProps.references.model));
+        const refTable = quote(
+          assertValidIdentifier(columnProps.references.model)
+        );
         const refColumn = quote(
           assertValidIdentifier(columnProps.references.column ?? "id")
         );
@@ -192,7 +196,11 @@ export class PostgresModel<T> extends BaseModel<T> {
   }
 
   public async count(where: Where<T> = {}): Promise<number> {
-    const { sql, values } = this.buildSelect("COUNT(*)::int AS count", where, {});
+    const { sql, values } = this.buildSelect(
+      "COUNT(*)::int AS count",
+      where,
+      {}
+    );
     const result = await this.pool.query(sql, values);
     const row = result.rows[0] as { count: number } | undefined;
     return Number(row?.count ?? 0);

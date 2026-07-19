@@ -1,7 +1,8 @@
 /**
- * PostgreSQL integration test. Opt-in: runs only when INDIGODB_INTEGRATION=1
- * and a live PostgreSQL instance is reachable via the PG_* env vars (see
- * .env.example). Excluded from the default `npm test` run by jest config.
+ * MongoDB integration test. Opt-in: runs only when INDIGODB_INTEGRATION=1 and
+ * a live MongoDB **replica set** (required for change streams + transactions)
+ * is reachable via MONGO_URL (see .env.example). Excluded from the default
+ * `npm test` run by jest config.
  */
 import "dotenv/config";
 import { IndigoDB } from "../../src/indigodb";
@@ -11,25 +12,25 @@ import { BaseModel } from "../../src/models/baseModel";
 import WebSocket from "ws";
 
 interface TestUser {
-  id: number;
+  _id?: unknown;
   name: string;
   email: string;
 }
 
 interface TestPost {
-  id: number;
+  _id?: unknown;
   title: string;
-  userId: number;
+  userId: unknown;
 }
 
 const RUN = process.env.INDIGODB_INTEGRATION === "1";
 const describeIntegration = RUN ? describe : describe.skip;
 
-const WS_PORT = Number(process.env.PG_TEST_WS_PORT ?? 8091);
-const TABLE = "indigodb_it_users";
-const POSTS_TABLE = "indigodb_it_posts";
+const WS_PORT = Number(process.env.MONGO_TEST_WS_PORT ?? 8092);
+const COLLECTION = "indigodb_it_users";
+const POSTS_COLLECTION = "indigodb_it_posts";
 
-describeIntegration("PostgreSQL integration", () => {
+describeIntegration("MongoDB integration", () => {
   let db: IndigoDB;
   let model: BaseModel<TestUser>;
   let posts: BaseModel<TestPost>;
@@ -37,36 +38,37 @@ describeIntegration("PostgreSQL integration", () => {
   beforeAll(async () => {
     db = new IndigoDB({
       database: {
-        type: "postgresql",
-        host: process.env.PG_HOST ?? "localhost",
-        port: Number(process.env.PG_PORT ?? 5432),
-        user: process.env.PG_USER,
-        password: process.env.PG_PASSWORD,
-        database: process.env.PG_DATABASE,
+        type: "mongodb",
+        connectionString:
+          process.env.MONGO_URL ?? "mongodb://localhost:27017/indigodb_test",
       },
       realtime: { enabled: true, port: WS_PORT },
     });
     await db.connect();
-    model = await db.defineModel<TestUser>(TABLE, {
-      id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+    model = await db.defineModel<TestUser>(COLLECTION, {
       name: { type: DataTypes.STRING },
       email: { type: DataTypes.STRING, unique: true },
     });
-    // References TABLE, so it must be defined after it (FK target must exist).
-    posts = await db.defineModel<TestPost>(POSTS_TABLE, {
-      id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+    posts = await db.defineModel<TestPost>(POSTS_COLLECTION, {
       title: { type: DataTypes.STRING },
-      userId: { type: DataTypes.INTEGER, references: { model: TABLE } },
+      userId: { type: DataTypes.STRING },
     });
     model.hasMany(posts, { foreignKey: "userId", as: "posts" });
     posts.belongsTo(model, { foreignKey: "userId", as: "author" });
   });
 
   afterAll(async () => {
+    // Drop everything this suite created so reruns start clean.
+    try {
+      await model?.deleteMany({});
+      await posts?.deleteMany({});
+    } catch {
+      // best-effort cleanup
+    }
     await db?.close();
   });
 
-  test("CRUD round-trip and real-time notifications over WebSocket", async () => {
+  test("CRUD round-trip and change-stream notifications over WebSocket", async () => {
     const events: ChangeEvent[] = [];
     const ws = new WebSocket(`ws://localhost:${WS_PORT}`);
     await new Promise((resolve, reject) => {
@@ -82,67 +84,63 @@ describeIntegration("PostgreSQL integration", () => {
       name: "Ada",
       email: `ada-${Date.now()}@example.com`,
     } as Partial<TestUser>);
-    expect((created as TestUser).id).toBeDefined();
+    expect((created as TestUser)._id).toBeDefined();
 
-    const updated = await model.update((created as TestUser).id, {
+    const updated = await model.update((created as TestUser)._id, {
       name: "Grace",
     } as Partial<TestUser>);
     expect((updated as TestUser).name).toBe("Grace");
 
-    const deleted = await model.delete((created as TestUser).id);
+    const deleted = await model.delete((created as TestUser)._id);
     expect(deleted).not.toBeNull();
 
-    // Give the trigger → NOTIFY → LISTEN → broadcast pipeline time to flush.
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    // Change streams are async; give them time to flush through the gateway.
+    await new Promise((resolve) => setTimeout(resolve, 1500));
     ws.close();
 
-    const operations = events.map((e) => e.operation);
+    const operations = events
+      .filter((e) => e.model === COLLECTION)
+      .map((e) => e.operation);
     expect(operations).toEqual(
       expect.arrayContaining(["INSERT", "UPDATE", "DELETE"])
     );
   });
 
   test("query engine round-trip: operators, orderBy, pagination and bulk ops", async () => {
-    const users = model as unknown as {
-      createMany(data: object[]): Promise<TestUser[]>;
-      findAll(where?: object, options?: object): Promise<TestUser[]>;
-      findOne(where?: object): Promise<TestUser | null>;
-      count(where?: object): Promise<number>;
-      updateMany(where: object, data: object): Promise<number>;
-      deleteMany(where: object): Promise<number>;
-    };
     const stamp = Date.now();
 
-    const created = await users.createMany([
+    const created = await model.createMany([
       { name: "qe_alpha", email: `qe-a-${stamp}@example.com` },
       { name: "qe_beta", email: `qe-b-${stamp}@example.com` },
       { name: "qe_gamma", email: `qe-c-${stamp}@example.com` },
-    ]);
+    ] as Partial<TestUser>[]);
     expect(created).toHaveLength(3);
 
-    const matched = await users.findAll(
-      { name: { $like: "qe\\_%" }, email: { $like: `%-${stamp}@%` } },
-      { orderBy: { name: "desc" }, limit: 2 }
+    const matched = await model.findAll(
+      { name: { $like: "qe\\_%" }, email: { $like: `%-${stamp}@%` } } as never,
+      { orderBy: { name: "desc" }, limit: 2 } as never
     );
     expect(matched.map((u) => u.name)).toEqual(["qe_gamma", "qe_beta"]);
 
-    const total = await users.count({ email: { $like: `%-${stamp}@%` } });
+    const total = await model.count({
+      email: { $like: `%-${stamp}@%` },
+    } as never);
     expect(total).toBe(3);
 
-    const one = await users.findOne({
+    const one = await model.findOne({
       $or: [{ name: "qe_alpha" }, { name: "does_not_exist" }],
-    });
+    } as never);
     expect(one?.name).toBe("qe_alpha");
 
-    const renamed = await users.updateMany(
-      { name: { $in: ["qe_alpha", "qe_beta"] } },
-      { name: "qe_renamed" }
+    const renamed = await model.updateMany(
+      { name: { $in: ["qe_alpha", "qe_beta"] } } as never,
+      { name: "qe_renamed" } as never
     );
     expect(renamed).toBe(2);
 
-    const removed = await users.deleteMany({
+    const removed = await model.deleteMany({
       email: { $like: `%-${stamp}@%` },
-    });
+    } as never);
     expect(removed).toBe(3);
   });
 
@@ -154,7 +152,7 @@ describeIntegration("PostgreSQL integration", () => {
       const txUsers = tx.getModel(model);
       await txUsers.create({ name: "tx_commit", email } as Partial<TestUser>);
     });
-    const committed = await model.findOne({ email });
+    const committed = await model.findOne({ email } as never);
     expect(committed?.name).toBe("tx_commit");
 
     const rollbackEmail = `tx-rollback-${stamp}@example.com`;
@@ -169,7 +167,7 @@ describeIntegration("PostgreSQL integration", () => {
       })
     ).rejects.toThrow("force rollback");
 
-    const rolledBack = await model.findOne({ email: rollbackEmail });
+    const rolledBack = await model.findOne({ email: rollbackEmail } as never);
     expect(rolledBack).toBeNull();
 
     await model.deleteMany({ email: { $like: `tx-%-${stamp}@%` } } as never);
@@ -181,31 +179,30 @@ describeIntegration("PostgreSQL integration", () => {
       name: "rel_author",
       email: `rel-${stamp}@example.com`,
     } as Partial<TestUser>);
+    // Store the raw ObjectId — this is exactly the case where identity-keyed
+    // joins would break (ObjectIds deserialize as distinct instances).
+    const authorId = (author as TestUser)._id;
 
     await posts.createMany([
-      { title: "Post A", userId: (author as TestUser).id },
-      { title: "Post B", userId: (author as TestUser).id },
+      { title: "Post A", userId: authorId },
+      { title: "Post B", userId: authorId },
     ] as Partial<TestPost>[]);
 
     const usersWithPosts = await model.findAll(
-      { id: (author as TestUser).id } as never,
-      { include: ["posts"] }
+      { email: `rel-${stamp}@example.com` } as never,
+      { include: ["posts"] } as never
     );
     expect(
       (usersWithPosts[0] as unknown as { posts: TestPost[] }).posts
     ).toHaveLength(2);
 
     const postsWithAuthor = await posts.findAll(
-      { userId: (author as TestUser).id } as never,
-      { include: ["author"] }
+      { userId: authorId } as never,
+      { include: ["author"] } as never
     );
-    for (const post of postsWithAuthor) {
-      expect((post as unknown as { author: TestUser }).author.email).toBe(
-        `rel-${stamp}@example.com`
-      );
-    }
+    expect(postsWithAuthor).toHaveLength(2);
 
-    await posts.deleteMany({ userId: (author as TestUser).id } as never);
-    await model.delete((author as TestUser).id);
+    await posts.deleteMany({ userId: authorId } as never);
+    await model.delete((author as TestUser)._id);
   });
 });

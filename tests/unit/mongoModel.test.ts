@@ -28,7 +28,9 @@ function makeCollection() {
     insertOne: jest.fn().mockResolvedValue({ insertedId: new ObjectId() }),
     insertMany: jest.fn().mockResolvedValue({ insertedIds: {} }),
     findOne: jest.fn().mockResolvedValue(null),
-    find: jest.fn().mockReturnValue({ toArray: jest.fn().mockResolvedValue([]) }),
+    find: jest
+      .fn()
+      .mockReturnValue({ toArray: jest.fn().mockResolvedValue([]) }),
     updateOne: jest.fn().mockResolvedValue({ matchedCount: 1 }),
     updateMany: jest.fn().mockResolvedValue({ modifiedCount: 0 }),
     deleteOne: jest.fn().mockResolvedValue({ deletedCount: 1 }),
@@ -40,7 +42,11 @@ function makeCollection() {
 
 function makeModel(collection = makeCollection()) {
   return {
-    model: new MongoModel<Product>("products", productSchema, collection as never),
+    model: new MongoModel<Product>(
+      "products",
+      productSchema,
+      collection as never
+    ),
     collection,
   };
 }
@@ -98,9 +104,9 @@ describe("MongoModel", () => {
 
   test("create rejects fields not in the schema", async () => {
     const { model } = makeModel();
-    await expect(
-      model.create({ hacked: true } as never)
-    ).rejects.toThrow(UnknownColumnError);
+    await expect(model.create({ hacked: true } as never)).rejects.toThrow(
+      UnknownColumnError
+    );
   });
 
   test("findById converts valid ObjectId strings", async () => {
@@ -202,7 +208,10 @@ describe("MongoModel", () => {
     collection.find.mockReturnValue(cursor);
     const { model } = makeModel(collection);
 
-    await model.findAll({ price: { $gt: "9.99" as never }, inStock: 1 as never });
+    await model.findAll({
+      price: { $gt: "9.99" as never },
+      inStock: 1 as never,
+    });
 
     expect(collection.find).toHaveBeenCalledWith(
       { price: { $gt: 9.99 }, inStock: true },
@@ -223,7 +232,10 @@ describe("MongoModel", () => {
     const { model } = makeModel(collection);
 
     await expect(model.count({ inStock: true })).resolves.toBe(4);
-    expect(collection.countDocuments).toHaveBeenCalledWith({ inStock: true }, {});
+    expect(collection.countDocuments).toHaveBeenCalledWith(
+      { inStock: true },
+      {}
+    );
   });
 
   test("exists uses a minimal projection", async () => {
@@ -330,7 +342,11 @@ describe("MongoModel schema completeness", () => {
     const collection = makeCollection();
     const inserted = { _id: new ObjectId(), email: "a@x.com", plan: "free" };
     collection.findOne.mockResolvedValue(inserted);
-    const model = new MongoModel<Account>("accounts", accountSchema, collection as never);
+    const model = new MongoModel<Account>(
+      "accounts",
+      accountSchema,
+      collection as never
+    );
 
     await model.create({ email: "a@x.com" });
 
@@ -342,16 +358,27 @@ describe("MongoModel schema completeness", () => {
 
   test("create throws ValidationError when a required field is missing", async () => {
     const collection = makeCollection();
-    const model = new MongoModel<Account>("accounts", accountSchema, collection as never);
-    await expect(model.create({ plan: "pro" })).rejects.toThrow(ValidationError);
+    const model = new MongoModel<Account>(
+      "accounts",
+      accountSchema,
+      collection as never
+    );
+    await expect(model.create({ plan: "pro" })).rejects.toThrow(
+      ValidationError
+    );
   });
 
   test("timestamps: create stamps createdAt/updatedAt and update refreshes updatedAt", async () => {
     const collection = makeCollection();
     collection.findOne.mockResolvedValue({ _id: new ObjectId() });
-    const model = new MongoModel<Account>("accounts", accountSchema, collection as never, {
-      timestamps: true,
-    });
+    const model = new MongoModel<Account>(
+      "accounts",
+      accountSchema,
+      collection as never,
+      {
+        timestamps: true,
+      }
+    );
 
     await model.create({ email: "a@x.com" });
     const inserted = collection.insertOne.mock.calls[0][0];
@@ -367,7 +394,11 @@ describe("MongoModel schema completeness", () => {
     const collection = makeCollection();
     const inserted = { _id: new ObjectId(), email: "a@x.com", plan: "free" };
     collection.findOne.mockResolvedValue(inserted);
-    const model = new MongoModel<Account>("accounts", accountSchema, collection as never);
+    const model = new MongoModel<Account>(
+      "accounts",
+      accountSchema,
+      collection as never
+    );
 
     const afterCreateCalls: Account[] = [];
     model.hooks.beforeCreate((data) => ({
@@ -390,7 +421,11 @@ describe("MongoModel schema completeness", () => {
     const collection = makeCollection();
     const existing = { _id: new ObjectId(), email: "a@x.com", plan: "free" };
     collection.findOne.mockResolvedValue(existing);
-    const model = new MongoModel<Account>("accounts", accountSchema, collection as never);
+    const model = new MongoModel<Account>(
+      "accounts",
+      accountSchema,
+      collection as never
+    );
 
     const events: string[] = [];
     model.hooks.beforeDelete((id) => {
@@ -406,7 +441,11 @@ describe("MongoModel schema completeness", () => {
 
   test("createMany applies defaults per row and skips hooks", async () => {
     const collection = makeCollection();
-    const model = new MongoModel<Account>("accounts", accountSchema, collection as never);
+    const model = new MongoModel<Account>(
+      "accounts",
+      accountSchema,
+      collection as never
+    );
     const beforeCreateCalls: unknown[] = [];
     model.hooks.beforeCreate((data) => {
       beforeCreateCalls.push(data);
@@ -415,7 +454,10 @@ describe("MongoModel schema completeness", () => {
     await model.createMany([{ email: "a@x.com" }, { email: "b@x.com" }]);
 
     expect(collection.insertMany).toHaveBeenCalledWith(
-      [{ email: "a@x.com", plan: "free" }, { email: "b@x.com", plan: "free" }],
+      [
+        { email: "a@x.com", plan: "free" },
+        { email: "b@x.com", plan: "free" },
+      ],
       {}
     );
     expect(beforeCreateCalls).toHaveLength(0);
@@ -455,7 +497,11 @@ describe("MongoModel relations", () => {
         { _id: userId2, name: "Bob" },
       ])
     );
-    const users = new MongoModel<RelUser>("users", relUserSchema, usersCollection as never);
+    const users = new MongoModel<RelUser>(
+      "users",
+      relUserSchema,
+      usersCollection as never
+    );
 
     const postsCollection = makeCollection();
     postsCollection.find.mockReturnValue(
@@ -465,22 +511,36 @@ describe("MongoModel relations", () => {
         { _id: new ObjectId(), title: "Post C", userId: userId2 },
       ])
     );
-    const posts = new MongoModel<RelPost>("posts", relPostSchema, postsCollection as never);
+    const posts = new MongoModel<RelPost>(
+      "posts",
+      relPostSchema,
+      postsCollection as never
+    );
 
     users.hasMany(posts, { foreignKey: "userId", as: "posts" });
 
     const result = await users.findAll({}, { include: ["posts"] });
 
     expect(postsCollection.find).toHaveBeenCalledTimes(1);
-    expect((result[0] as unknown as { posts: unknown[] }).posts).toHaveLength(2);
-    expect((result[1] as unknown as { posts: unknown[] }).posts).toHaveLength(1);
+    expect((result[0] as unknown as { posts: unknown[] }).posts).toHaveLength(
+      2
+    );
+    expect((result[1] as unknown as { posts: unknown[] }).posts).toHaveLength(
+      1
+    );
   });
 
   test("belongsTo + include attaches a single related record or null", async () => {
     const userId = new ObjectId();
     const usersCollection = makeCollection();
-    usersCollection.find.mockReturnValue(cursorOf([{ _id: userId, name: "Ada" }]));
-    const users = new MongoModel<RelUser>("users", relUserSchema, usersCollection as never);
+    usersCollection.find.mockReturnValue(
+      cursorOf([{ _id: userId, name: "Ada" }])
+    );
+    const users = new MongoModel<RelUser>(
+      "users",
+      relUserSchema,
+      usersCollection as never
+    );
 
     const postsCollection = makeCollection();
     postsCollection.find.mockReturnValue(
@@ -489,21 +549,29 @@ describe("MongoModel relations", () => {
         { _id: new ObjectId(), title: "Orphan", userId: new ObjectId() },
       ])
     );
-    const posts = new MongoModel<RelPost>("posts", relPostSchema, postsCollection as never);
+    const posts = new MongoModel<RelPost>(
+      "posts",
+      relPostSchema,
+      postsCollection as never
+    );
 
     posts.belongsTo(users, { foreignKey: "userId", as: "author" });
 
     const result = await posts.findAll({}, { include: ["author"] });
 
-    expect((result[0] as unknown as { author: { name: string } }).author.name).toBe(
-      "Ada"
-    );
+    expect(
+      (result[0] as unknown as { author: { name: string } }).author.name
+    ).toBe("Ada");
     expect((result[1] as unknown as { author: unknown }).author).toBeNull();
   });
 
   test("findAll rejects an unregistered include name", async () => {
     const collection = makeCollection();
-    const model = new MongoModel<RelPost>("posts", relPostSchema, collection as never);
+    const model = new MongoModel<RelPost>(
+      "posts",
+      relPostSchema,
+      collection as never
+    );
     await expect(model.findAll({}, { include: ["nope"] })).rejects.toThrow(
       ConfigurationError
     );
@@ -512,12 +580,65 @@ describe("MongoModel relations", () => {
   test("include is a no-op for an empty result set (no extra query issued)", async () => {
     const usersCollection = makeCollection();
     usersCollection.find.mockReturnValue(cursorOf([]));
-    const users = new MongoModel<RelUser>("users", relUserSchema, usersCollection as never);
+    const users = new MongoModel<RelUser>(
+      "users",
+      relUserSchema,
+      usersCollection as never
+    );
     const postsCollection = makeCollection();
-    const posts = new MongoModel<RelPost>("posts", relPostSchema, postsCollection as never);
+    const posts = new MongoModel<RelPost>(
+      "posts",
+      relPostSchema,
+      postsCollection as never
+    );
     users.hasMany(posts, { foreignKey: "userId", as: "posts" });
 
     await users.findAll({}, { include: ["posts"] });
     expect(postsCollection.find).not.toHaveBeenCalled();
+  });
+
+  test("joins match ObjectIds by value, not by object identity", async () => {
+    const userId = new ObjectId();
+    // Deliberately distinct instances with the same hex value — exactly what
+    // real driver deserialization produces across two separate queries.
+    const sameIdOtherInstance = new ObjectId(userId.toHexString());
+
+    const usersCollection = makeCollection();
+    usersCollection.find.mockReturnValue(
+      cursorOf([{ _id: userId, name: "Ada" }])
+    );
+    const users = new MongoModel<RelUser>(
+      "users",
+      relUserSchema,
+      usersCollection as never
+    );
+
+    const postsCollection = makeCollection();
+    postsCollection.find.mockReturnValue(
+      cursorOf([
+        { _id: new ObjectId(), title: "Post A", userId: sameIdOtherInstance },
+      ])
+    );
+    const posts = new MongoModel<RelPost>(
+      "posts",
+      relPostSchema,
+      postsCollection as never
+    );
+
+    users.hasMany(posts, { foreignKey: "userId", as: "posts" });
+    posts.belongsTo(users, { foreignKey: "userId", as: "author" });
+
+    const withPosts = await users.findAll({}, { include: ["posts"] });
+    expect(
+      (withPosts[0] as unknown as { posts: unknown[] }).posts
+    ).toHaveLength(1);
+
+    usersCollection.find.mockReturnValue(
+      cursorOf([{ _id: userId, name: "Ada" }])
+    );
+    const withAuthor = await posts.findAll({}, { include: ["author"] });
+    expect(
+      (withAuthor[0] as unknown as { author: { name: string } }).author.name
+    ).toBe("Ada");
   });
 });

@@ -1,10 +1,4 @@
-import {
-  ClientSession,
-  Collection,
-  Document,
-  Filter,
-  ObjectId,
-} from "mongodb";
+import { ClientSession, Collection, Document, Filter, ObjectId } from "mongodb";
 import { BaseModel } from "../../models/baseModel";
 import { HookRegistry } from "../../models/hooks";
 import { ModelOptions, ModelSchema } from "../../types";
@@ -59,7 +53,9 @@ export class MongoModel<T> extends BaseModel<T> {
   }
 
   /** Merges `{ session }` into driver call options when running in a transaction. */
-  private withOptions<O extends object>(extra?: O): O & { session?: ClientSession } {
+  private withOptions<O extends object>(
+    extra?: O
+  ): O & { session?: ClientSession } {
     return this.session
       ? { ...(extra ?? ({} as O)), session: this.session }
       : (extra ?? ({} as O));
@@ -126,7 +122,10 @@ export class MongoModel<T> extends BaseModel<T> {
       withDefaults as Partial<T>
     );
     const document = this.coerceTypes(afterHooks as Record<string, unknown>);
-    const result = await this.collection.insertOne(document, this.withOptions());
+    const result = await this.collection.insertOne(
+      document,
+      this.withOptions()
+    );
     // Re-read by the driver-assigned _id, not the (possibly custom) primary
     // key, which may not be populated on the just-inserted document.
     const inserted = await this.collection.findOne(
@@ -142,7 +141,10 @@ export class MongoModel<T> extends BaseModel<T> {
     options: QueryOptions<T> = {}
   ): Promise<T[]> {
     this.assertKnownOptionColumns(options);
-    let cursor = this.collection.find(this.buildFilter(where), this.withOptions());
+    let cursor = this.collection.find(
+      this.buildFilter(where),
+      this.withOptions()
+    );
 
     const orderEntries = Object.entries(options.orderBy ?? {});
     if (orderEntries.length > 0) {
@@ -203,7 +205,10 @@ export class MongoModel<T> extends BaseModel<T> {
       this.assertKnownColumns(record);
       return this.coerceTypes(this.prepareForCreate(record));
     });
-    const result = await this.collection.insertMany(documents, this.withOptions());
+    const result = await this.collection.insertMany(
+      documents,
+      this.withOptions()
+    );
     const ids = Object.values(result.insertedIds);
     const inserted = await this.collection
       .find({ _id: { $in: ids } } as Filter<Document>, this.withOptions())
@@ -212,7 +217,9 @@ export class MongoModel<T> extends BaseModel<T> {
     const byId = new Map(inserted.map((doc) => [String(doc._id), doc]));
     return ids
       .map((id) => byId.get(String(id)))
-      .filter((doc): doc is NonNullable<typeof doc> => doc !== undefined) as T[];
+      .filter(
+        (doc): doc is NonNullable<typeof doc> => doc !== undefined
+      ) as T[];
   }
 
   public async updateMany(where: Where<T>, data: Partial<T>): Promise<number> {

@@ -23,9 +23,7 @@ describe("compileWhere (PostgreSQL)", () => {
   });
 
   test("comparison operators", () => {
-    expect(
-      compileWhere({ age: { $gte: 18, $lt: 65 } }, quote)
-    ).toEqual({
+    expect(compileWhere({ age: { $gte: 18, $lt: 65 } }, quote)).toEqual({
       sql: '"age" >= $1 AND "age" < $2',
       values: [18, 65],
     });
@@ -43,10 +41,12 @@ describe("compileWhere (PostgreSQL)", () => {
   });
 
   test("$in compiles to ANY with an array parameter", () => {
-    expect(compileWhere({ role: { $in: ["admin", "editor"] } }, quote)).toEqual({
-      sql: '"role" = ANY($1)',
-      values: [["admin", "editor"]],
-    });
+    expect(compileWhere({ role: { $in: ["admin", "editor"] } }, quote)).toEqual(
+      {
+        sql: '"role" = ANY($1)',
+        values: [["admin", "editor"]],
+      }
+    );
   });
 
   test("$nin compiles to <> ALL", () => {
@@ -76,10 +76,7 @@ describe("compileWhere (PostgreSQL)", () => {
 
   test("$or joins parenthesized branches", () => {
     expect(
-      compileWhere(
-        { $or: [{ plan: "pro" }, { credits: { $gt: 0 } }] },
-        quote
-      )
+      compileWhere({ $or: [{ plan: "pro" }, { credits: { $gt: 0 } }] }, quote)
     ).toEqual({
       sql: '("plan" = $1 OR "credits" > $2)',
       values: ["pro", 0],
@@ -87,10 +84,7 @@ describe("compileWhere (PostgreSQL)", () => {
   });
 
   test("multi-condition $or branches get their own parens", () => {
-    const { sql } = compileWhere(
-      { $or: [{ a: 1, b: 2 }, { c: 3 }] },
-      quote
-    );
+    const { sql } = compileWhere({ $or: [{ a: 1, b: 2 }, { c: 3 }] }, quote);
     expect(sql).toBe('(("a" = $1 AND "b" = $2) OR "c" = $3)');
   });
 
@@ -114,9 +108,9 @@ describe("compileWhere (PostgreSQL)", () => {
     expect(() => compileWhere({ age: { $gte: 1, $bogus: 2 } }, quote)).toThrow(
       QueryError
     );
-    expect(() =>
-      compileWhere({ age: { $gte: 1, plain: 2 } }, quote)
-    ).toThrow(QueryError);
+    expect(() => compileWhere({ age: { $gte: 1, plain: 2 } }, quote)).toThrow(
+      QueryError
+    );
   });
 
   test("rejects malformed operand types", () => {

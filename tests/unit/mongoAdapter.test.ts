@@ -190,8 +190,8 @@ describe("MongoAdapter", () => {
     await adapter.disconnect();
 
     expect(stream.close).toHaveBeenCalled();
-    const clientInstance = (MongoClient as unknown as jest.Mock).mock.results[0]!
-      .value;
+    const clientInstance = (MongoClient as unknown as jest.Mock).mock
+      .results[0]!.value;
     expect(clientInstance.close).toHaveBeenCalled();
   });
 

@@ -12,9 +12,13 @@ IndigoDB (`@adinet/indigodb`) is a lightweight TypeScript ORM for Node.js that w
 - Test: `npm test` (Jest via ts-jest) — the default suite is **fully mocked and needs no database**
 - Run a single test file: `npx jest tests/unit/postgresModel.test.ts`
 - Run a single test by name: `npx jest -t "create builds a parameterized INSERT"`
-- Integration tests (opt-in, need live DBs): `npm run test:integration` — reads connection details from `.env` (see `.env.example`) and is gated by `INDIGODB_INTEGRATION=1`
+- Integration tests (opt-in, need live DBs): `npm run test:integration` — reads connection details from `.env` (see `.env.example`) and is gated by `INDIGODB_INTEGRATION=1`. Postgres suite + Mongo suite (Mongo must be a **replica set**; a `?directConnection=true` connection string is needed for single-node RS).
+- Lint: `npm run lint` (ESLint flat config + Prettier check); `npm run format` writes Prettier formatting. The repo is Prettier-formatted — run `npm run format` after editing rather than hand-matching style.
+- API docs: `npm run docs` (typedoc → `docs/`, gitignored).
 
 `jest.config.js` excludes `tests/integration/` from the default run unless `INDIGODB_INTEGRATION` is set, so `npm test` never hangs waiting on a database.
+
+CI (`.github/workflows/ci.yml`) runs unit (Node 18/20/22: build, typecheck, lint, jest --coverage) + integration (Postgres 16 service container; Mongo 7 started manually via `docker run --replSet` + `rs.initiate` because service containers can't pass command args) + docs artifact, on every PR and push to master.
 
 ## Architecture
 

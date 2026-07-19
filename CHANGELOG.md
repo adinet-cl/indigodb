@@ -27,6 +27,33 @@ release. Purely additive (no existing signature changes), but versioned as
   target models first); MongoDB treats it as documentation only, since it
   has no native FK constraints.
 
+### Fixed
+
+- Relation joins now match keys **by value** (`String()`-normalized), not by
+  object identity — MongoDB ObjectIds deserialize as distinct instances
+  across queries, which made identity-keyed `include` joins silently attach
+  empty/null results against real data.
+
+### Infrastructure
+
+- **CI (GitHub Actions)**: unit suite on Node 18/20/22 (build + typecheck +
+  lint + coverage) and the integration suite against real containers —
+  Postgres 16 as a service, Mongo 7 as a manually-started single-node
+  replica set — on every PR and push to master.
+- **MongoDB integration test** (`tests/integration/mongo.integration.test.ts`):
+  parity with the Postgres one — CRUD, change-stream real-time, query engine,
+  transactions, relations. Opt-in via `INDIGODB_INTEGRATION=1`.
+- **ESLint + Prettier** (`npm run lint` / `npm run format`): ESLint 9 flat
+  config with typescript-eslint; repo formatted with Prettier.
+- **API docs** (`npm run docs`): typedoc over the main + `/client` entry
+  points; built as a CI artifact.
+- **LICENSE file added** — the package always declared MIT but never shipped
+  the actual license text.
+- `BeforeDeleteHook<T>` → `BeforeDeleteHook` (the type parameter was never
+  used; before-delete hooks only receive the id). `HookRegistry` is now
+  exported.
+- Dual ESM + CJS build deliberately deferred to v3.1.
+
 ## [2.5.0] - 2026-07-19
 
 Advanced real-time. Fully backward compatible with v2.4 — clients that never

@@ -16,7 +16,7 @@ export type BeforeUpdateHook<T> = (
   data: Partial<T>
 ) => Partial<T> | void | Promise<Partial<T> | void>;
 export type AfterUpdateHook<T> = (record: T) => void | Promise<void>;
-export type BeforeDeleteHook<T> = (id: unknown) => void | Promise<void>;
+export type BeforeDeleteHook = (id: unknown) => void | Promise<void>;
 export type AfterDeleteHook<T> = (record: T) => void | Promise<void>;
 
 export class HookRegistry<T> {
@@ -24,7 +24,7 @@ export class HookRegistry<T> {
   private readonly afterCreateHooks: AfterCreateHook<T>[] = [];
   private readonly beforeUpdateHooks: BeforeUpdateHook<T>[] = [];
   private readonly afterUpdateHooks: AfterUpdateHook<T>[] = [];
-  private readonly beforeDeleteHooks: BeforeDeleteHook<T>[] = [];
+  private readonly beforeDeleteHooks: BeforeDeleteHook[] = [];
   private readonly afterDeleteHooks: AfterDeleteHook<T>[] = [];
 
   public beforeCreate(hook: BeforeCreateHook<T>): void {
@@ -39,7 +39,7 @@ export class HookRegistry<T> {
   public afterUpdate(hook: AfterUpdateHook<T>): void {
     this.afterUpdateHooks.push(hook);
   }
-  public beforeDelete(hook: BeforeDeleteHook<T>): void {
+  public beforeDelete(hook: BeforeDeleteHook): void {
     this.beforeDeleteHooks.push(hook);
   }
   public afterDelete(hook: AfterDeleteHook<T>): void {

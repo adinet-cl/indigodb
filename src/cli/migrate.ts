@@ -32,13 +32,17 @@ function loadConfig(configPath: string): CliConfig {
   if (!existsSync(configPath)) {
     throw new Error(`Config file not found: "${configPath}"`);
   }
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
+
   const loaded = require(configPath);
   return (loaded.default ?? loaded) as CliConfig;
 }
 
 function slugify(name: string): string {
-  return name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+  return name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
 }
 
 function scaffoldMigration(directory: string, name: string): string {
@@ -64,7 +68,10 @@ module.exports = {
 const KNOWN_COMMANDS = ["up", "down", "status", "create"] as const;
 
 /** Splits `--config <path>` out of argv, leaving only positional arguments. */
-function extractArgs(argv: string[]): { positional: string[]; configPath: string } {
+function extractArgs(argv: string[]): {
+  positional: string[];
+  configPath: string;
+} {
   const positional: string[] = [];
   let configPath: string | undefined;
   for (let i = 0; i < argv.length; i++) {
@@ -134,8 +141,12 @@ export async function runCli(
       }
       case "status": {
         const status = await runner.status();
-        log(`Applied (${status.applied.length}): ${status.applied.join(", ") || "-"}`);
-        log(`Pending (${status.pending.length}): ${status.pending.join(", ") || "-"}`);
+        log(
+          `Applied (${status.applied.length}): ${status.applied.join(", ") || "-"}`
+        );
+        log(
+          `Pending (${status.pending.length}): ${status.pending.join(", ") || "-"}`
+        );
         return 0;
       }
       default:

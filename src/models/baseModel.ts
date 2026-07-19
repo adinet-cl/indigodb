@@ -76,7 +76,9 @@ export abstract class BaseModel<T> {
   }
 
   /** Fills in `default` values for columns missing from the payload. */
-  protected applyDefaults(data: Record<string, unknown>): Record<string, unknown> {
+  protected applyDefaults(
+    data: Record<string, unknown>
+  ): Record<string, unknown> {
     const result = { ...data };
     for (const [column, definition] of Object.entries(this.schema)) {
       if (result[column] === undefined && definition.default !== undefined) {
@@ -207,6 +209,9 @@ export abstract class BaseModel<T> {
 
   private async attachOne(rows: T[], assoc: AssociationDef): Promise<void> {
     const records = rows as unknown as Record<string, unknown>[];
+    // Join keys are compared via String(): Mongo ObjectIds deserialize as
+    // distinct object instances, so identity-keyed Maps would never match.
+    const keyOf = (value: unknown) => String(value);
 
     if (assoc.type === "hasMany") {
       const ids = [...new Set(records.map((r) => r[this.primaryKey]))];
@@ -214,15 +219,15 @@ export abstract class BaseModel<T> {
         [assoc.foreignKey]: { $in: ids },
       } as never)) as unknown as Record<string, unknown>[];
 
-      const byForeignKey = new Map<unknown, Record<string, unknown>[]>();
+      const byForeignKey = new Map<string, Record<string, unknown>[]>();
       for (const record of related) {
-        const key = record[assoc.foreignKey];
+        const key = keyOf(record[assoc.foreignKey]);
         const bucket = byForeignKey.get(key);
         if (bucket) bucket.push(record);
         else byForeignKey.set(key, [record]);
       }
       for (const row of records) {
-        row[assoc.as] = byForeignKey.get(row[this.primaryKey]) ?? [];
+        row[assoc.as] = byForeignKey.get(keyOf(row[this.primaryKey])) ?? [];
       }
       return;
     }
@@ -239,12 +244,16 @@ export abstract class BaseModel<T> {
       [assoc.target.primaryKey]: { $in: ids },
     } as never)) as unknown as Record<string, unknown>[];
 
-    const byPrimaryKey = new Map<unknown, Record<string, unknown>>();
+    const byPrimaryKey = new Map<string, Record<string, unknown>>();
     for (const record of related) {
-      byPrimaryKey.set(record[assoc.target.primaryKey], record);
+      byPrimaryKey.set(keyOf(record[assoc.target.primaryKey]), record);
     }
     for (const row of records) {
-      row[assoc.as] = byPrimaryKey.get(row[assoc.foreignKey]) ?? null;
+      const foreignKey = row[assoc.foreignKey];
+      row[assoc.as] =
+        foreignKey === null || foreignKey === undefined
+          ? null
+          : (byPrimaryKey.get(keyOf(foreignKey)) ?? null);
     }
   }
 
@@ -262,7 +271,10 @@ export abstract class BaseModel<T> {
   public abstract count(where?: Where<T>): Promise<number>;
   public abstract exists(where?: Where<T>): Promise<boolean>;
   public abstract update(id: unknown, data: Partial<T>): Promise<T | null>;
-  public abstract updateMany(where: Where<T>, data: Partial<T>): Promise<number>;
+  public abstract updateMany(
+    where: Where<T>,
+    data: Partial<T>
+  ): Promise<number>;
   public abstract delete(id: unknown): Promise<T | null>;
   public abstract deleteMany(where: Where<T>): Promise<number>;
 }

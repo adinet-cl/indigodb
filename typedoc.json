@@ -1,0 +1,8 @@
+{
+  "entryPoints": ["src/index.ts", "src/client/realtimeClient.ts"],
+  "out": "docs",
+  "excludePrivate": true,
+  "excludeInternal": true,
+  "includeVersion": true,
+  "readme": "README.md"
+}
