@@ -88,7 +88,7 @@ describe("MongoModel", () => {
 
     const result = await model.create({ name: "Widget" });
 
-    expect(collection.findOne).toHaveBeenCalledWith({ _id: insertedId });
+    expect(collection.findOne).toHaveBeenCalledWith({ _id: insertedId }, {});
     expect(result).toEqual(doc);
   });
 
@@ -126,7 +126,8 @@ describe("MongoModel", () => {
 
     expect(collection.updateOne).toHaveBeenCalledWith(
       { _id: id },
-      { $set: { price: 19.99 } }
+      { $set: { price: 19.99 } },
+      {}
     );
     expect(result).toEqual(updated);
   });
@@ -146,7 +147,7 @@ describe("MongoModel", () => {
 
     const result = await model.delete(id);
 
-    expect(collection.deleteOne).toHaveBeenCalledWith({ _id: id });
+    expect(collection.deleteOne).toHaveBeenCalledWith({ _id: id }, {});
     expect(result).toEqual(existing);
   });
 
@@ -181,9 +182,10 @@ describe("MongoModel", () => {
       }
     );
 
-    expect(collection.find).toHaveBeenCalledWith({
-      price: { $gte: 10, $lt: 100 },
-    });
+    expect(collection.find).toHaveBeenCalledWith(
+      { price: { $gte: 10, $lt: 100 } },
+      {}
+    );
     expect(cursor.sort).toHaveBeenCalledWith({ price: -1 });
     expect(cursor.skip).toHaveBeenCalledWith(5);
     expect(cursor.limit).toHaveBeenCalledWith(10);
@@ -198,10 +200,10 @@ describe("MongoModel", () => {
 
     await model.findAll({ price: { $gt: "9.99" as never }, inStock: 1 as never });
 
-    expect(collection.find).toHaveBeenCalledWith({
-      price: { $gt: 9.99 },
-      inStock: true,
-    });
+    expect(collection.find).toHaveBeenCalledWith(
+      { price: { $gt: 9.99 }, inStock: true },
+      {}
+    );
   });
 
   test("findAll rejects unknown columns anywhere in the tree", async () => {
@@ -217,7 +219,7 @@ describe("MongoModel", () => {
     const { model } = makeModel(collection);
 
     await expect(model.count({ inStock: true })).resolves.toBe(4);
-    expect(collection.countDocuments).toHaveBeenCalledWith({ inStock: true });
+    expect(collection.countDocuments).toHaveBeenCalledWith({ inStock: true }, {});
   });
 
   test("exists uses a minimal projection", async () => {
@@ -252,10 +254,10 @@ describe("MongoModel", () => {
       { name: "B" },
     ]);
 
-    expect(collection.insertMany).toHaveBeenCalledWith([
-      { name: "A", price: 1 },
-      { name: "B" },
-    ]);
+    expect(collection.insertMany).toHaveBeenCalledWith(
+      [{ name: "A", price: 1 }, { name: "B" }],
+      {}
+    );
     expect(result).toEqual([docA, docB]);
   });
 
@@ -271,7 +273,8 @@ describe("MongoModel", () => {
 
     expect(collection.updateMany).toHaveBeenCalledWith(
       { inStock: false },
-      { $set: { price: 0 } }
+      { $set: { price: 0 } },
+      {}
     );
     expect(affected).toBe(5);
   });
@@ -282,7 +285,7 @@ describe("MongoModel", () => {
     const { model } = makeModel(collection);
 
     await expect(model.deleteMany({ inStock: false })).resolves.toBe(2);
-    expect(collection.deleteMany).toHaveBeenCalledWith({ inStock: false });
+    expect(collection.deleteMany).toHaveBeenCalledWith({ inStock: false }, {});
   });
 });
 
@@ -327,10 +330,10 @@ describe("MongoModel schema completeness", () => {
 
     await model.create({ email: "a@x.com" });
 
-    expect(collection.insertOne).toHaveBeenCalledWith({
-      email: "a@x.com",
-      plan: "free",
-    });
+    expect(collection.insertOne).toHaveBeenCalledWith(
+      { email: "a@x.com", plan: "free" },
+      {}
+    );
   });
 
   test("create throws ValidationError when a required field is missing", async () => {
@@ -372,10 +375,10 @@ describe("MongoModel schema completeness", () => {
 
     await model.create({ email: "A@X.COM" });
 
-    expect(collection.insertOne).toHaveBeenCalledWith({
-      email: "a@x.com",
-      plan: "free",
-    });
+    expect(collection.insertOne).toHaveBeenCalledWith(
+      { email: "a@x.com", plan: "free" },
+      {}
+    );
     expect(afterCreateCalls).toEqual([inserted]);
   });
 
@@ -407,10 +410,10 @@ describe("MongoModel schema completeness", () => {
 
     await model.createMany([{ email: "a@x.com" }, { email: "b@x.com" }]);
 
-    expect(collection.insertMany).toHaveBeenCalledWith([
-      { email: "a@x.com", plan: "free" },
-      { email: "b@x.com", plan: "free" },
-    ]);
+    expect(collection.insertMany).toHaveBeenCalledWith(
+      [{ email: "a@x.com", plan: "free" }, { email: "b@x.com", plan: "free" }],
+      {}
+    );
     expect(beforeCreateCalls).toHaveLength(0);
   });
 });

@@ -6,7 +6,7 @@ import {
   ModelOptions,
   ModelSchema,
 } from "./types";
-import { DatabaseAdapter } from "./adapters/adapter";
+import { DatabaseAdapter, TransactionContext } from "./adapters/adapter";
 import { PostgresAdapter } from "./adapters/postgres/postgresAdapter";
 import { MongoAdapter } from "./adapters/mongo/mongoAdapter";
 import { RealtimeGateway } from "./realtime/gateway";
@@ -96,6 +96,20 @@ export class IndigoDB extends EventEmitter {
       throw new ConnectionError("Call connect() before running raw queries");
     }
     return this.adapter.raw(query, params);
+  }
+
+  /**
+   * Runs `fn` atomically: `tx.getModel(model)` exchanges an already-defined
+   * model for a clone bound to the transaction, sharing its schema and hooks.
+   * Commits on success; rolls back and rethrows if `fn` throws.
+   */
+  public async transaction<R>(
+    fn: (tx: TransactionContext) => Promise<R>
+  ): Promise<R> {
+    if (!this.connected) {
+      throw new ConnectionError("Call connect() before starting a transaction");
+    }
+    return this.adapter.transaction(fn);
   }
 
   public async close(): Promise<void> {

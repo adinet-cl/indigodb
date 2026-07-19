@@ -15,6 +15,15 @@ const mockDb = {
   command: jest.fn(),
 };
 
+function makeMockSession() {
+  return {
+    endSession: jest.fn().mockResolvedValue(undefined),
+    withTransaction: jest.fn(async (fn: () => Promise<unknown>) => {
+      await fn();
+    }),
+  };
+}
+
 jest.mock("mongodb", () => {
   const actual = jest.requireActual("mongodb");
   return {
@@ -23,6 +32,7 @@ jest.mock("mongodb", () => {
       connect: jest.fn().mockResolvedValue(undefined),
       close: jest.fn().mockResolvedValue(undefined),
       db: jest.fn(() => mockDb),
+      startSession: jest.fn(() => makeMockSession()),
     })),
   };
 });
@@ -183,5 +193,69 @@ describe("MongoAdapter", () => {
     const clientInstance = (MongoClient as unknown as jest.Mock).mock.results[0]!
       .value;
     expect(clientInstance.close).toHaveBeenCalled();
+  });
+
+  describe("transaction()", () => {
+    function lastClientInstance() {
+      return (MongoClient as unknown as jest.Mock).mock.results[0]!.value;
+    }
+
+    test("runs fn inside session.withTransaction and ends the session", async () => {
+      const adapter = new MongoAdapter(config);
+      await adapter.connect();
+
+      const result = await adapter.transaction(async () => "done");
+
+      expect(result).toBe("done");
+      const client = lastClientInstance();
+      const session = client.startSession.mock.results[0].value;
+      expect(session.withTransaction).toHaveBeenCalled();
+      expect(session.endSession).toHaveBeenCalled();
+    });
+
+    test("propagates errors thrown by fn and still ends the session", async () => {
+      const adapter = new MongoAdapter(config);
+      await adapter.connect();
+
+      await expect(
+        adapter.transaction(async () => {
+          throw new Error("boom");
+        })
+      ).rejects.toThrow("boom");
+
+      const client = lastClientInstance();
+      const session = client.startSession.mock.results[0].value;
+      expect(session.endSession).toHaveBeenCalled();
+    });
+
+    test("getModel() binds the model to the transaction session and shares hooks", async () => {
+      const cursor = { toArray: jest.fn().mockResolvedValue([]) };
+      mockCollection.find.mockReturnValue(cursor);
+
+      const { adapter } = await connectedAdapterWithModel();
+      const model = await adapter.defineModel("products", {
+        name: { type: DataTypes.STRING },
+      });
+
+      let seenSameHooks = false;
+      await adapter.transaction(async (tx) => {
+        const txModel = tx.getModel(model);
+        seenSameHooks = txModel.hooks === model.hooks;
+        await txModel.findAll();
+      });
+
+      expect(seenSameHooks).toBe(true);
+      const client = lastClientInstance();
+      const session = client.startSession.mock.results[0].value;
+      // findAll() passed the session through to the driver call.
+      expect(mockCollection.find).toHaveBeenCalledWith({}, { session });
+    });
+
+    test("throws when connect() was not called first", async () => {
+      const adapter = new MongoAdapter(config);
+      await expect(adapter.transaction(async () => undefined)).rejects.toThrow(
+        "not connected"
+      );
+    });
   });
 });

@@ -10,6 +10,7 @@ import {
   Where,
 } from "../../query/where";
 import { compileWhere } from "./whereCompiler";
+import { HookRegistry } from "../../models/hooks";
 
 /** Minimal query surface the model needs; satisfied by pg.Pool. */
 export interface QueryExecutor {
@@ -35,11 +36,27 @@ export class PostgresModel<T> extends BaseModel<T> {
     name: string,
     schema: ModelSchema,
     pool: QueryExecutor | Pool,
-    options: ModelOptions = {}
+    options: ModelOptions = {},
+    sharedHooks?: HookRegistry<T>
   ) {
     // No default primary key: Postgres schemas must declare one explicitly.
-    super(name, schema, undefined, options);
+    super(name, schema, undefined, options, sharedHooks);
     this.pool = pool as QueryExecutor;
+  }
+
+  /**
+   * Returns a clone bound to a different query executor (e.g. a transaction
+   * client) that shares this model's schema and hooks. Skips init() — the
+   * table/triggers/indexes already exist. Used by PostgresAdapter.transaction().
+   */
+  public withClient(client: QueryExecutor): PostgresModel<T> {
+    return new PostgresModel<T>(
+      this.name,
+      this.schema,
+      client,
+      { timestamps: this.timestamps },
+      this.hooks
+    );
   }
 
   /** Creates the table, indexes and change-notification triggers. Must complete before CRUD. */

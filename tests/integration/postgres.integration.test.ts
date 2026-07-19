@@ -47,11 +47,6 @@ describeIntegration("PostgreSQL integration", () => {
   });
 
   afterAll(async () => {
-    // Best-effort cleanup, then close everything so the process exits cleanly.
-    const anyModel = model as unknown as {
-      create: (d: Partial<TestUser>) => Promise<TestUser>;
-    };
-    void anyModel;
     await db?.close();
   });
 
@@ -133,5 +128,34 @@ describeIntegration("PostgreSQL integration", () => {
       email: { $like: `%-${stamp}@%` },
     });
     expect(removed).toBe(3);
+  });
+
+  test("transaction commits on success and rolls back on error", async () => {
+    const stamp = Date.now();
+    const email = `tx-commit-${stamp}@example.com`;
+
+    await db.transaction(async (tx) => {
+      const txUsers = tx.getModel(model);
+      await txUsers.create({ name: "tx_commit", email } as Partial<TestUser>);
+    });
+    const committed = await model.findOne({ email });
+    expect(committed?.name).toBe("tx_commit");
+
+    const rollbackEmail = `tx-rollback-${stamp}@example.com`;
+    await expect(
+      db.transaction(async (tx) => {
+        const txUsers = tx.getModel(model);
+        await txUsers.create({
+          name: "tx_rollback",
+          email: rollbackEmail,
+        } as Partial<TestUser>);
+        throw new Error("force rollback");
+      })
+    ).rejects.toThrow("force rollback");
+
+    const rolledBack = await model.findOne({ email: rollbackEmail });
+    expect(rolledBack).toBeNull();
+
+    await model.deleteMany({ email: { $like: `tx-%-${stamp}@%` } } as never);
   });
 });

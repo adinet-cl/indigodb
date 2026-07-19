@@ -4,6 +4,27 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.0] - 2026-07-19
+
+Transactions. Fully backward compatible with v2.2.
+
+### Added
+
+- **`db.transaction(async (tx) => { ... })`**: commits on success, rolls back
+  and rethrows if the callback throws.
+  - PostgreSQL: a dedicated pooled connection running `BEGIN` / `COMMIT` /
+    `ROLLBACK`; the connection is always released back to the pool.
+  - MongoDB: a `ClientSession` driven by `withTransaction` (requires a
+    replica set, same constraint as change streams); the session is always
+    ended.
+- **`tx.getModel(model)`**: exchanges an already-`defineModel`'d instance for
+  a clone bound to the transaction — same schema, primary key and (crucially)
+  the **same `hooks` registry** as the original, so hooks registered before
+  entering the transaction still fire for operations run through it. Queries
+  made via the clone participate in the transaction; the original model
+  handle is unaffected and keeps working outside of it.
+- New `TransactionContext` type (exported).
+
 ## [2.2.0] - 2026-07-19
 
 Schema completeness + lifecycle hooks. Fully backward compatible with v2.1.

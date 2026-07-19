@@ -17,11 +17,11 @@ matter — ordered below by dependency and cost.
 | **Query engine**: operators (`$gt`, `$in`, `$like`, `$or`, ...), `orderBy` / `limit` / `offset` / `select`, `findOne` / `count` / `exists`, bulk ops (`createMany` / `updateMany` / `deleteMany`), `db.raw()` escape hatch | ✅ v2.1 |
 | **Schema completeness**: `required`, `default` (value or factory), non-unique + unique indexes on both backends, `timestamps` model option | ✅ v2.2 |
 | **Lifecycle hooks**: `beforeCreate`/`afterCreate`/`beforeUpdate`/`afterUpdate`/`beforeDelete`/`afterDelete` via `model.hooks` | ✅ v2.2 |
+| **Transactions**: `db.transaction(async (tx) => ...)` with `tx.getModel()` (shares hooks with the original model), automatic commit/rollback on both backends | ✅ v2.3 |
 | Mocked unit suite (no DB required) + opt-in integration suite | ✅ v2.0 |
 
 ## What's missing (the gaps)
 
-- **Transactions**: atomic multi-operation units with rollback.
 - **Migrations**: `CREATE TABLE IF NOT EXISTS` never alters existing tables —
   schema evolution is manual today.
 - **Advanced real-time**: per-model/filtered subscriptions, WebSocket
@@ -37,7 +37,7 @@ matter — ordered below by dependency and cost.
 - Model hooks: `beforeCreate/afterCreate`, `beforeUpdate/afterUpdate`,
   `beforeDelete/afterDelete` registered on the model instance.
 
-### v2.3.0 — Transacciones
+### v2.3.0 — Transacciones ✅ Done
 - `db.transaction(async (tx) => { ... })` with automatic COMMIT/ROLLBACK.
 - PostgreSQL: dedicated pool client with `BEGIN`; models run against the
   transaction client via the existing `QueryExecutor` seam.
