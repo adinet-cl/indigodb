@@ -20,14 +20,22 @@ export abstract class BaseModel<T> {
   public readonly schema: ModelSchema;
   public readonly primaryKey: string;
   public readonly timestamps: boolean;
-  public readonly hooks = new HookRegistry<T>();
+  public readonly hooks: HookRegistry<T>;
 
   protected constructor(
     name: string,
     schema: ModelSchema,
     defaultPrimaryKey?: string,
-    options: ModelOptions = {}
+    options: ModelOptions = {},
+    /**
+     * Shares an existing HookRegistry instead of creating a new one — used by
+     * transaction-bound clones (see PostgresModel.withClient /
+     * MongoModel.withSession) so hooks registered on the original model also
+     * run for operations performed through the transaction handle.
+     */
+    sharedHooks?: HookRegistry<T>
   ) {
+    this.hooks = sharedHooks ?? new HookRegistry<T>();
     this.name = assertValidIdentifier(name);
     for (const column of Object.keys(schema)) {
       assertValidIdentifier(column);

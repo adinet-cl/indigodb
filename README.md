@@ -112,6 +112,7 @@ The payload shape is identical whether the change originated in PostgreSQL or Mo
 - **`connect(): Promise<void>`** — connects the adapter (fails fast on bad credentials) and starts the WebSocket server if real-time is enabled.
 - **`defineModel<T>(name, schema, options?): Promise<Model<T>>`** — creates the table/collection (indexes, Postgres triggers) and resolves once it is ready. **Async** — always `await` it. `options.timestamps: true` adds managed `createdAt`/`updatedAt` columns.
 - **`on("change", listener)`** — subscribe to `ChangeEvent`s in-process (inherited from `EventEmitter`).
+- **`transaction<R>(fn): Promise<R>`** — see [Transactions](#transactions).
 - **`close(): Promise<void>`** — stops the WebSocket server, closes change streams, and drains the connection pool / client.
 
 ### Model methods
@@ -164,6 +165,26 @@ Accounts.hooks.beforeDelete((id) => auditLog.record("account.delete", id));
 ```
 
 Available hooks: `beforeCreate`, `afterCreate`, `beforeUpdate`, `afterUpdate`, `beforeDelete`, `afterDelete`. A `before*` hook may return a partial payload that gets merged into the pending data (returning nothing leaves it unchanged); `after*` hooks are for side effects and run with the persisted record. Hooks run for single-row `create()` / `update()` / `delete()` only — bulk operations (`createMany` / `updateMany` / `deleteMany`) skip them by default, so a bulk call never silently re-fetches every affected row.
+
+## Transactions
+
+```typescript
+await db.transaction(async (tx) => {
+  const accounts = tx.getModel(Accounts);
+  const transfers = tx.getModel(Transfers);
+
+  const from = await accounts.update(fromId, { balance: fromBalance - amount });
+  const to = await accounts.update(toId, { balance: toBalance + amount });
+  await transfers.create({ fromId, toId, amount });
+
+  if (from!.balance < 0) throw new Error("insufficient funds"); // rolls everything back
+});
+```
+
+`tx.getModel(model)` exchanges an already-`defineModel`'d instance for a clone bound to the transaction — same schema and **the same hooks registry**, so hooks registered on the original model still fire. Every query made through the clone runs inside the transaction; throwing anywhere in the callback rolls it back and rejects `db.transaction()` with that error, otherwise it commits automatically.
+
+- **PostgreSQL**: a dedicated pooled connection running `BEGIN` / `COMMIT` / `ROLLBACK`.
+- **MongoDB**: a `ClientSession` (requires a replica set — same constraint as change streams).
 
 ## Querying
 

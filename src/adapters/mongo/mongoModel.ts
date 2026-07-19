@@ -1,5 +1,12 @@
-import { Collection, Document, Filter, ObjectId } from "mongodb";
+import {
+  ClientSession,
+  Collection,
+  Document,
+  Filter,
+  ObjectId,
+} from "mongodb";
 import { BaseModel } from "../../models/baseModel";
+import { HookRegistry } from "../../models/hooks";
 import { ModelOptions, ModelSchema } from "../../types";
 import {
   assertNonNegativeInteger,
@@ -27,10 +34,35 @@ export class MongoModel<T> extends BaseModel<T> {
     name: string,
     schema: ModelSchema,
     private readonly collection: Collection<Document>,
-    options: ModelOptions = {}
+    options: ModelOptions = {},
+    sharedHooks?: HookRegistry<T>,
+    private readonly session?: ClientSession
   ) {
     // MongoDB documents always carry an _id, so it is the default primary key.
-    super(name, schema, "_id", options);
+    super(name, schema, "_id", options, sharedHooks);
+  }
+
+  /**
+   * Returns a clone bound to a transaction session — same collection, schema
+   * and hooks, but every operation is passed `{ session }` so it participates
+   * in the transaction. Used by MongoAdapter.transaction().
+   */
+  public withSession(session: ClientSession): MongoModel<T> {
+    return new MongoModel<T>(
+      this.name,
+      this.schema,
+      this.collection,
+      { timestamps: this.timestamps },
+      this.hooks,
+      session
+    );
+  }
+
+  /** Merges `{ session }` into driver call options when running in a transaction. */
+  private withOptions<O extends object>(extra?: O): O & { session?: ClientSession } {
+    return this.session
+      ? { ...(extra ?? ({} as O)), session: this.session }
+      : (extra ?? ({} as O));
   }
 
   /** Creates unique/non-unique indexes declared in the schema. */
@@ -94,12 +126,13 @@ export class MongoModel<T> extends BaseModel<T> {
       withDefaults as Partial<T>
     );
     const document = this.coerceTypes(afterHooks as Record<string, unknown>);
-    const result = await this.collection.insertOne(document);
+    const result = await this.collection.insertOne(document, this.withOptions());
     // Re-read by the driver-assigned _id, not the (possibly custom) primary
     // key, which may not be populated on the just-inserted document.
-    const inserted = await this.collection.findOne({
-      _id: result.insertedId,
-    } as Filter<Document>);
+    const inserted = await this.collection.findOne(
+      { _id: result.insertedId } as Filter<Document>,
+      this.withOptions()
+    );
     await this.hooks.runAfterCreate(inserted as T);
     return inserted as T;
   }
@@ -109,7 +142,7 @@ export class MongoModel<T> extends BaseModel<T> {
     options: QueryOptions<T> = {}
   ): Promise<T[]> {
     this.assertKnownOptionColumns(options);
-    let cursor = this.collection.find(this.buildFilter(where));
+    let cursor = this.collection.find(this.buildFilter(where), this.withOptions());
 
     const orderEntries = Object.entries(options.orderBy ?? {});
     if (orderEntries.length > 0) {
@@ -147,13 +180,17 @@ export class MongoModel<T> extends BaseModel<T> {
   }
 
   public async count(where: Where<T> = {}): Promise<number> {
-    return this.collection.countDocuments(this.buildFilter(where));
+    return this.collection.countDocuments(
+      this.buildFilter(where),
+      this.withOptions()
+    );
   }
 
   public async exists(where: Where<T> = {}): Promise<boolean> {
-    const found = await this.collection.findOne(this.buildFilter(where), {
-      projection: { _id: 1 },
-    });
+    const found = await this.collection.findOne(
+      this.buildFilter(where),
+      this.withOptions({ projection: { _id: 1 } })
+    );
     return found !== null;
   }
 
@@ -166,10 +203,10 @@ export class MongoModel<T> extends BaseModel<T> {
       this.assertKnownColumns(record);
       return this.coerceTypes(this.prepareForCreate(record));
     });
-    const result = await this.collection.insertMany(documents);
+    const result = await this.collection.insertMany(documents, this.withOptions());
     const ids = Object.values(result.insertedIds);
     const inserted = await this.collection
-      .find({ _id: { $in: ids } } as Filter<Document>)
+      .find({ _id: { $in: ids } } as Filter<Document>, this.withOptions())
       .toArray();
     // Preserve input order (find() does not guarantee it).
     const byId = new Map(inserted.map((doc) => [String(doc._id), doc]));
@@ -182,21 +219,27 @@ export class MongoModel<T> extends BaseModel<T> {
     const stamped = this.prepareForUpdate(data as Record<string, unknown>);
     const updates = this.coerceTypes(stamped);
     if (Object.keys(updates).length === 0) return 0;
-    const result = await this.collection.updateMany(this.buildFilter(where), {
-      $set: updates,
-    });
+    const result = await this.collection.updateMany(
+      this.buildFilter(where),
+      { $set: updates },
+      this.withOptions()
+    );
     return result.modifiedCount;
   }
 
   public async deleteMany(where: Where<T>): Promise<number> {
-    const result = await this.collection.deleteMany(this.buildFilter(where));
+    const result = await this.collection.deleteMany(
+      this.buildFilter(where),
+      this.withOptions()
+    );
     return result.deletedCount;
   }
 
   public async findById(id: unknown): Promise<T | null> {
-    const result = await this.collection.findOne({
-      [this.primaryKey]: this.toId(id),
-    } as Filter<Document>);
+    const result = await this.collection.findOne(
+      { [this.primaryKey]: this.toId(id) } as Filter<Document>,
+      this.withOptions()
+    );
     return (result as T) ?? null;
   }
 
@@ -210,7 +253,8 @@ export class MongoModel<T> extends BaseModel<T> {
     const updates = this.coerceTypes(afterHooks as Record<string, unknown>);
     await this.collection.updateOne(
       { [this.primaryKey]: this.toId(id) } as Filter<Document>,
-      { $set: updates }
+      { $set: updates },
+      this.withOptions()
     );
     const row = await this.findById(id);
     if (row) await this.hooks.runAfterUpdate(row);
@@ -221,9 +265,10 @@ export class MongoModel<T> extends BaseModel<T> {
     await this.hooks.runBeforeDelete(id);
     const existing = await this.findById(id);
     if (!existing) return null;
-    await this.collection.deleteOne({
-      [this.primaryKey]: this.toId(id),
-    } as Filter<Document>);
+    await this.collection.deleteOne(
+      { [this.primaryKey]: this.toId(id) } as Filter<Document>,
+      this.withOptions()
+    );
     await this.hooks.runAfterDelete(existing);
     return existing;
   }

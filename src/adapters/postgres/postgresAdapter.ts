@@ -1,5 +1,6 @@
 import { Client, Pool } from "pg";
-import { DatabaseAdapter } from "../adapter";
+import { DatabaseAdapter, TransactionContext } from "../adapter";
+import { BaseModel } from "../../models/baseModel";
 import { PostgresModel } from "./postgresModel";
 import { NOTIFICATION_CHANNEL } from "./constants";
 import {
@@ -8,7 +9,7 @@ import {
   ModelSchema,
   PostgresConfig,
 } from "../../types";
-import { ConnectionError, QueryError } from "../../errors";
+import { ConfigurationError, ConnectionError, QueryError } from "../../errors";
 import { Logger, noopLogger } from "../../logger";
 
 const LISTENER_RETRY_DELAY_MS = 5000;
@@ -114,6 +115,39 @@ export class PostgresAdapter extends DatabaseAdapter {
     const model = new PostgresModel<T>(name, schema, this.pool, options);
     await model.init();
     return model;
+  }
+
+  public async transaction<R>(
+    fn: (tx: TransactionContext) => Promise<R>
+  ): Promise<R> {
+    if (!this.pool) {
+      throw new ConnectionError("PostgresAdapter is not connected");
+    }
+    const client = await this.pool.connect();
+    const ctx: TransactionContext = {
+      getModel: <T>(model: BaseModel<T>): BaseModel<T> => {
+        if (!(model instanceof PostgresModel)) {
+          throw new ConfigurationError(
+            "transaction.getModel() was passed a model from a different adapter"
+          );
+        }
+        return model.withClient(client) as unknown as BaseModel<T>;
+      },
+    };
+
+    try {
+      await client.query("BEGIN");
+      const result = await fn(ctx);
+      await client.query("COMMIT");
+      return result;
+    } catch (err) {
+      await client.query("ROLLBACK").catch((rollbackErr) => {
+        this.logger.error("Failed to roll back transaction", rollbackErr);
+      });
+      throw err;
+    } finally {
+      client.release();
+    }
   }
 
   public async raw(query: unknown, params?: unknown[]): Promise<unknown> {

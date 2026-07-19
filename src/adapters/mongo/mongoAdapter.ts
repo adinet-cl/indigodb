@@ -6,7 +6,8 @@ import {
   Document,
   MongoClient,
 } from "mongodb";
-import { DatabaseAdapter } from "../adapter";
+import { DatabaseAdapter, TransactionContext } from "../adapter";
+import { BaseModel } from "../../models/baseModel";
 import { MongoModel } from "./mongoModel";
 import { ChangeEvent, ModelOptions, ModelSchema, MongoConfig } from "../../types";
 import {
@@ -126,6 +127,37 @@ export class MongoAdapter extends DatabaseAdapter {
         };
       default:
         return null;
+    }
+  }
+
+  public async transaction<R>(
+    fn: (tx: TransactionContext) => Promise<R>
+  ): Promise<R> {
+    if (!this.client) {
+      throw new ConnectionError("MongoAdapter is not connected");
+    }
+    const session = this.client.startSession();
+    try {
+      let result: R | undefined;
+      // withTransaction retries the callback on transient transaction errors,
+      // so `fn` must be safe to run more than once — it only reads model
+      // handles and performs the caller's operations, no local side effects.
+      await session.withTransaction(async () => {
+        const ctx: TransactionContext = {
+          getModel: <T>(model: BaseModel<T>): BaseModel<T> => {
+            if (!(model instanceof MongoModel)) {
+              throw new ConfigurationError(
+                "transaction.getModel() was passed a model from a different adapter"
+              );
+            }
+            return model.withSession(session) as unknown as BaseModel<T>;
+          },
+        };
+        result = await fn(ctx);
+      });
+      return result as R;
+    } finally {
+      await session.endSession();
     }
   }
 
