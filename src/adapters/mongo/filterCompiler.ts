@@ -2,15 +2,27 @@ import { QueryError } from "../../errors";
 import { FieldOperators, isOperatorObject } from "../../query/where";
 
 /**
- * Translates a SQL LIKE pattern (`%`, `_` wildcards) into an anchored,
- * escaped RegExp so metacharacters in the pattern cannot inject regex.
+ * Translates a SQL LIKE pattern (`%`, `_` wildcards; `\%`, `\_`, `\\`
+ * escapes) into an anchored, escaped RegExp so metacharacters in the pattern
+ * cannot inject regex. Escape handling matches PostgreSQL's default LIKE
+ * behavior so `$like` behaves identically on both backends.
  */
 export function likeToRegex(pattern: string): RegExp {
   let source = "";
-  for (const char of pattern) {
-    if (char === "%") source += ".*";
-    else if (char === "_") source += ".";
-    else source += char.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  for (let i = 0; i < pattern.length; i++) {
+    const char = pattern[i]!;
+    if (char === "\\" && i + 1 < pattern.length) {
+      // SQL LIKE escape: the next character is a literal (\%, \_, \\).
+      const next = pattern[i + 1]!;
+      source += next.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      i++;
+    } else if (char === "%") {
+      source += ".*";
+    } else if (char === "_") {
+      source += ".";
+    } else {
+      source += char.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    }
   }
   return new RegExp(`^${source}$`);
 }
