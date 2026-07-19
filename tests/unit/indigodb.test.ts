@@ -133,7 +133,11 @@ describe("IndigoDB", () => {
 
     const model = await db.defineModel("users", schema);
 
-    expect(firstAdapter().defineModel).toHaveBeenCalledWith("users", schema);
+    expect(firstAdapter().defineModel).toHaveBeenCalledWith(
+      "users",
+      schema,
+      undefined
+    );
     expect(model).toEqual({ name: "users" });
   });
 

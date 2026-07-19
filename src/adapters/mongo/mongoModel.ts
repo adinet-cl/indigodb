@@ -1,6 +1,6 @@
 import { Collection, Document, Filter, ObjectId } from "mongodb";
 import { BaseModel } from "../../models/baseModel";
-import { ModelSchema } from "../../types";
+import { ModelOptions, ModelSchema } from "../../types";
 import {
   assertNonNegativeInteger,
   QueryOptions,
@@ -26,10 +26,23 @@ export class MongoModel<T> extends BaseModel<T> {
   constructor(
     name: string,
     schema: ModelSchema,
-    private readonly collection: Collection<Document>
+    private readonly collection: Collection<Document>,
+    options: ModelOptions = {}
   ) {
     // MongoDB documents always carry an _id, so it is the default primary key.
-    super(name, schema, "_id");
+    super(name, schema, "_id", options);
+  }
+
+  /** Creates unique/non-unique indexes declared in the schema. */
+  public async init(): Promise<void> {
+    for (const [column, definition] of Object.entries(this.schema)) {
+      if (column === this.primaryKey) continue;
+      if (definition.unique) {
+        await this.collection.createIndex({ [column]: 1 }, { unique: true });
+      } else if (definition.index) {
+        await this.collection.createIndex({ [column]: 1 });
+      }
+    }
   }
 
   private toId(id: unknown): unknown {
@@ -75,13 +88,19 @@ export class MongoModel<T> extends BaseModel<T> {
   }
 
   public async create(data: Partial<T>): Promise<T> {
-    const document = this.coerceTypes(data as Record<string, unknown>);
+    this.assertKnownColumns(data as Record<string, unknown>);
+    const withDefaults = this.prepareForCreate(data as Record<string, unknown>);
+    const afterHooks = await this.hooks.runBeforeCreate(
+      withDefaults as Partial<T>
+    );
+    const document = this.coerceTypes(afterHooks as Record<string, unknown>);
     const result = await this.collection.insertOne(document);
     // Re-read by the driver-assigned _id, not the (possibly custom) primary
     // key, which may not be populated on the just-inserted document.
     const inserted = await this.collection.findOne({
       _id: result.insertedId,
     } as Filter<Document>);
+    await this.hooks.runAfterCreate(inserted as T);
     return inserted as T;
   }
 
@@ -140,9 +159,13 @@ export class MongoModel<T> extends BaseModel<T> {
 
   public async createMany(data: Partial<T>[]): Promise<T[]> {
     if (data.length === 0) return [];
-    const documents = data.map((row) =>
-      this.coerceTypes(row as Record<string, unknown>)
-    );
+    // Hooks are skipped for bulk operations (see HookRegistry docs); defaults,
+    // timestamps and required-column validation still apply per row.
+    const documents = data.map((row) => {
+      const record = row as Record<string, unknown>;
+      this.assertKnownColumns(record);
+      return this.coerceTypes(this.prepareForCreate(record));
+    });
     const result = await this.collection.insertMany(documents);
     const ids = Object.values(result.insertedIds);
     const inserted = await this.collection
@@ -156,7 +179,8 @@ export class MongoModel<T> extends BaseModel<T> {
   }
 
   public async updateMany(where: Where<T>, data: Partial<T>): Promise<number> {
-    const updates = this.coerceTypes(data as Record<string, unknown>);
+    const stamped = this.prepareForUpdate(data as Record<string, unknown>);
+    const updates = this.coerceTypes(stamped);
     if (Object.keys(updates).length === 0) return 0;
     const result = await this.collection.updateMany(this.buildFilter(where), {
       $set: updates,
@@ -177,20 +201,30 @@ export class MongoModel<T> extends BaseModel<T> {
   }
 
   public async update(id: unknown, data: Partial<T>): Promise<T | null> {
-    const updates = this.coerceTypes(data as Record<string, unknown>);
+    this.assertKnownColumns(data as Record<string, unknown>);
+    const stamped = this.prepareForUpdate(data as Record<string, unknown>);
+    const afterHooks = await this.hooks.runBeforeUpdate(
+      id,
+      stamped as Partial<T>
+    );
+    const updates = this.coerceTypes(afterHooks as Record<string, unknown>);
     await this.collection.updateOne(
       { [this.primaryKey]: this.toId(id) } as Filter<Document>,
       { $set: updates }
     );
-    return this.findById(id);
+    const row = await this.findById(id);
+    if (row) await this.hooks.runAfterUpdate(row);
+    return row;
   }
 
   public async delete(id: unknown): Promise<T | null> {
+    await this.hooks.runBeforeDelete(id);
     const existing = await this.findById(id);
     if (!existing) return null;
     await this.collection.deleteOne({
       [this.primaryKey]: this.toId(id),
     } as Filter<Document>);
+    await this.hooks.runAfterDelete(existing);
     return existing;
   }
 }

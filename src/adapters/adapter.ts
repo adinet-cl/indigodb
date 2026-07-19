@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { ChangeEvent, ModelSchema } from "../types";
+import { ChangeEvent, ModelOptions, ModelSchema } from "../types";
 import { BaseModel } from "../models/baseModel";
 
 /**
@@ -13,7 +13,8 @@ export abstract class DatabaseAdapter extends EventEmitter {
   public abstract disconnect(): Promise<void>;
   public abstract defineModel<T>(
     name: string,
-    schema: ModelSchema
+    schema: ModelSchema,
+    options?: ModelOptions
   ): Promise<BaseModel<T>>;
   /**
    * Native escape hatch. PostgreSQL: a SQL string + parameter values.

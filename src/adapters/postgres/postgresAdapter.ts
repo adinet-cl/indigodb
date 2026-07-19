@@ -2,7 +2,12 @@ import { Client, Pool } from "pg";
 import { DatabaseAdapter } from "../adapter";
 import { PostgresModel } from "./postgresModel";
 import { NOTIFICATION_CHANNEL } from "./constants";
-import { ChangeEvent, ModelSchema, PostgresConfig } from "../../types";
+import {
+  ChangeEvent,
+  ModelOptions,
+  ModelSchema,
+  PostgresConfig,
+} from "../../types";
 import { ConnectionError, QueryError } from "../../errors";
 import { Logger, noopLogger } from "../../logger";
 
@@ -100,12 +105,13 @@ export class PostgresAdapter extends DatabaseAdapter {
 
   public async defineModel<T>(
     name: string,
-    schema: ModelSchema
+    schema: ModelSchema,
+    options?: ModelOptions
   ): Promise<PostgresModel<T>> {
     if (!this.pool) {
       throw new ConnectionError("PostgresAdapter is not connected");
     }
-    const model = new PostgresModel<T>(name, schema, this.pool);
+    const model = new PostgresModel<T>(name, schema, this.pool, options);
     await model.init();
     return model;
   }

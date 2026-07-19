@@ -110,7 +110,7 @@ The payload shape is identical whether the change originated in PostgreSQL or Mo
 ### Methods
 
 - **`connect(): Promise<void>`** — connects the adapter (fails fast on bad credentials) and starts the WebSocket server if real-time is enabled.
-- **`defineModel<T>(name, schema): Promise<Model<T>>`** — creates the table/collection (and Postgres triggers) and resolves once it is ready. **Async** — always `await` it.
+- **`defineModel<T>(name, schema, options?): Promise<Model<T>>`** — creates the table/collection (indexes, Postgres triggers) and resolves once it is ready. **Async** — always `await` it. `options.timestamps: true` adds managed `createdAt`/`updatedAt` columns.
 - **`on("change", listener)`** — subscribe to `ChangeEvent`s in-process (inherited from `EventEmitter`).
 - **`close(): Promise<void>`** — stops the WebSocket server, closes change streams, and drains the connection pool / client.
 
@@ -131,6 +131,39 @@ The payload shape is identical whether the change originated in PostgreSQL or Mo
 | `deleteMany(where)` | Bulk delete; returns the number of removed records. |
 
 The primary key is taken from the column marked `primaryKey: true` in the schema (PostgreSQL), or defaults to `_id` (MongoDB).
+
+## Schema features
+
+Beyond `type` / `primaryKey` / `autoIncrement` / `unique`, columns support:
+
+```typescript
+const Accounts = await db.defineModel<Account>(
+  "accounts",
+  {
+    id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+    email: { type: DataTypes.STRING, required: true, unique: true },
+    plan: { type: DataTypes.STRING, default: "free" }, // static value...
+    apiKey: { type: DataTypes.STRING, default: () => crypto.randomUUID() }, // ...or a factory
+    status: { type: DataTypes.STRING, index: true }, // non-unique index
+  },
+  { timestamps: true } // adds managed createdAt / updatedAt columns
+);
+```
+
+- **`required`** — rejects `create()`/`createMany()` calls missing the column (after defaults are applied) with a `ValidationError`.
+- **`default`** — a static value or a zero-argument factory invoked per row when the column is omitted.
+- **`index`** — creates a non-unique index; `unique` (already available) creates a unique index on both backends.
+- **`timestamps`** (model option) — `createdAt` is stamped on `create()`; `updatedAt` is stamped on `create()` and refreshed on every `update()` / `updateMany()`.
+
+## Lifecycle hooks
+
+```typescript
+Accounts.hooks.beforeCreate((data) => ({ email: (data.email as string).toLowerCase() }));
+Accounts.hooks.afterCreate((account) => sendWelcomeEmail(account.email));
+Accounts.hooks.beforeDelete((id) => auditLog.record("account.delete", id));
+```
+
+Available hooks: `beforeCreate`, `afterCreate`, `beforeUpdate`, `afterUpdate`, `beforeDelete`, `afterDelete`. A `before*` hook may return a partial payload that gets merged into the pending data (returning nothing leaves it unchanged); `after*` hooks are for side effects and run with the persisted record. Hooks run for single-row `create()` / `update()` / `delete()` only — bulk operations (`createMany` / `updateMany` / `deleteMany`) skip them by default, so a bulk call never silently re-fetches every affected row.
 
 ## Querying
 

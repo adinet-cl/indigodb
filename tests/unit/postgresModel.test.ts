@@ -6,6 +6,7 @@ import {
   QueryError,
   UnknownColumnError,
   UnsupportedTypeError,
+  ValidationError,
 } from "../../src/errors";
 import { ModelSchema } from "../../src/types";
 
@@ -323,5 +324,154 @@ describe("PostgresModel", () => {
     const model = new PostgresModel<User>("users", userSchema, makePool());
     await expect(model.findAll({}, { limit: -1 })).rejects.toThrow(QueryError);
     await expect(model.findAll({}, { offset: 1.5 })).rejects.toThrow(QueryError);
+  });
+});
+
+describe("PostgresModel schema completeness", () => {
+  interface Account {
+    id: number;
+    email: string;
+    plan: string;
+    createdAt?: Date;
+    updatedAt?: Date;
+  }
+
+  const accountSchema: ModelSchema = {
+    id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+    email: { type: DataTypes.STRING, required: true, unique: true, index: true },
+    plan: { type: DataTypes.STRING, default: "free" },
+  };
+
+  test("createTable adds NOT NULL for required columns", async () => {
+    const pool = makePool();
+    const model = new PostgresModel<Account>("accounts", accountSchema, pool);
+    await model.init();
+
+    const createTableSql = pool.query.mock.calls[0][0] as string;
+    expect(createTableSql).toContain(
+      '"email" VARCHAR(255) UNIQUE NOT NULL'
+    );
+  });
+
+  test("init creates a non-unique index only for index:true, non-unique columns", async () => {
+    const pool = makePool();
+    const model = new PostgresModel<Account>("accounts", accountSchema, pool);
+    await model.init();
+
+    // email is unique, so no separate non-unique index statement is issued.
+    const indexCalls = pool.query.mock.calls
+      .map((call) => call[0] as string)
+      .filter((sql) => sql.includes("CREATE INDEX"));
+    expect(indexCalls).toHaveLength(0);
+  });
+
+  test("init creates a non-unique index for index:true columns without unique", async () => {
+    const schema: ModelSchema = {
+      id: { type: DataTypes.INTEGER, primaryKey: true },
+      status: { type: DataTypes.STRING, index: true },
+    };
+    const pool = makePool();
+    const model = new PostgresModel("statuses", schema, pool);
+    await model.init();
+
+    const indexSql = pool.query.mock.calls
+      .map((call) => call[0] as string)
+      .find((sql) => sql.includes("CREATE INDEX"));
+    expect(indexSql).toContain('CREATE INDEX IF NOT EXISTS "statuses_status_idx"');
+    expect(indexSql).toContain('ON "statuses" ("status")');
+  });
+
+  test("create applies default values for missing columns", async () => {
+    const pool = makePool([{ id: 1, email: "a@x.com", plan: "free" }]);
+    const model = new PostgresModel<Account>("accounts", accountSchema, pool);
+
+    await model.create({ email: "a@x.com" });
+
+    expect(pool.query).toHaveBeenCalledWith(
+      'INSERT INTO "accounts" ("email", "plan") VALUES ($1, $2) RETURNING *;',
+      ["a@x.com", "free"]
+    );
+  });
+
+  test("create throws ValidationError when a required column is missing", async () => {
+    const pool = makePool();
+    const model = new PostgresModel<Account>("accounts", accountSchema, pool);
+    await expect(model.create({ plan: "pro" })).rejects.toThrow(ValidationError);
+  });
+
+  test("timestamps: create stamps createdAt/updatedAt and update refreshes updatedAt", async () => {
+    const pool = makePool([{ id: 1 }]);
+    const model = new PostgresModel<Account>("accounts", accountSchema, pool, {
+      timestamps: true,
+    });
+
+    await model.create({ email: "a@x.com" });
+    const insertSql = pool.query.mock.calls[0][0] as string;
+    const insertValues = pool.query.mock.calls[0][1] as unknown[];
+    expect(insertSql).toContain('"createdAt"');
+    expect(insertSql).toContain('"updatedAt"');
+    expect(insertValues.some((v) => v instanceof Date)).toBe(true);
+
+    await model.update(1, { plan: "pro" });
+    const updateSql = pool.query.mock.calls[1][0] as string;
+    expect(updateSql).toContain('"updatedAt" = $');
+  });
+
+  test("hooks: beforeCreate can transform the payload, afterCreate observes the record", async () => {
+    const row = { id: 1, email: "a@x.com", plan: "free" };
+    const pool = makePool([row]);
+    const model = new PostgresModel<Account>("accounts", accountSchema, pool);
+
+    const afterCreateCalls: Account[] = [];
+    model.hooks.beforeCreate((data) => ({
+      email: (data.email as string).toLowerCase(),
+    }));
+    model.hooks.afterCreate((record) => {
+      afterCreateCalls.push(record);
+    });
+
+    await model.create({ email: "A@X.COM" });
+
+    const insertValues = pool.query.mock.calls[0][1] as unknown[];
+    expect(insertValues).toContain("a@x.com");
+    expect(afterCreateCalls).toEqual([row]);
+  });
+
+  test("hooks: beforeDelete/afterDelete run around delete()", async () => {
+    const row = { id: 1, email: "a@x.com", plan: "free" };
+    const pool = makePool([row]);
+    const model = new PostgresModel<Account>("accounts", accountSchema, pool);
+
+    const events: string[] = [];
+    model.hooks.beforeDelete((id) => {
+      events.push(`before:${id}`);
+    });
+    model.hooks.afterDelete((record) => {
+      events.push(`after:${record.id}`);
+    });
+
+    await model.delete(1);
+    expect(events).toEqual(["before:1", "after:1"]);
+  });
+
+  test("createMany applies defaults per row and skips hooks", async () => {
+    const rows = [
+      { id: 1, email: "a@x.com", plan: "free" },
+      { id: 2, email: "b@x.com", plan: "free" },
+    ];
+    const pool = makePool(rows);
+    const model = new PostgresModel<Account>("accounts", accountSchema, pool);
+    const beforeCreateCalls: unknown[] = [];
+    model.hooks.beforeCreate((data) => {
+      beforeCreateCalls.push(data);
+    });
+
+    await model.createMany([{ email: "a@x.com" }, { email: "b@x.com" }]);
+
+    expect(pool.query).toHaveBeenCalledWith(
+      'INSERT INTO "accounts" ("email", "plan") VALUES ($1, $2), ($3, $4) RETURNING *;',
+      ["a@x.com", "free", "b@x.com", "free"]
+    );
+    expect(beforeCreateCalls).toHaveLength(0);
   });
 });

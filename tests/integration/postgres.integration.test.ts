@@ -7,6 +7,7 @@ import "dotenv/config";
 import { IndigoDB } from "../../src/indigodb";
 import { DataTypes } from "../../src/dataTypes";
 import { ChangeEvent } from "../../src/types";
+import { BaseModel } from "../../src/models/baseModel";
 import WebSocket from "ws";
 
 interface TestUser {
@@ -23,7 +24,7 @@ const TABLE = "indigodb_it_users";
 
 describeIntegration("PostgreSQL integration", () => {
   let db: IndigoDB;
-  let model: Awaited<ReturnType<IndigoDB["defineModel"]>>;
+  let model: BaseModel<TestUser>;
 
   beforeAll(async () => {
     db = new IndigoDB({

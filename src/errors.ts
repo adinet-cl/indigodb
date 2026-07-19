@@ -31,3 +31,9 @@ export class UnknownColumnError extends IndigoDBError {
 }
 
 export class QueryError extends IndigoDBError {}
+
+export class ValidationError extends IndigoDBError {
+  constructor(column: string, model: string) {
+    super(`"${column}" is required for model "${model}"`);
+  }
+}

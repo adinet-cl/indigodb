@@ -1,6 +1,6 @@
 import type { Pool } from "pg";
 import { BaseModel } from "../../models/baseModel";
-import { ModelSchema } from "../../types";
+import { ModelOptions, ModelSchema } from "../../types";
 import { POSTGRES_TYPE_MAP } from "../../dataTypes";
 import { QueryError, UnsupportedTypeError } from "../../errors";
 import { NOTIFICATION_CHANNEL } from "./constants";
@@ -31,15 +31,21 @@ function quote(identifier: string): string {
 export class PostgresModel<T> extends BaseModel<T> {
   private readonly pool: QueryExecutor;
 
-  constructor(name: string, schema: ModelSchema, pool: QueryExecutor | Pool) {
+  constructor(
+    name: string,
+    schema: ModelSchema,
+    pool: QueryExecutor | Pool,
+    options: ModelOptions = {}
+  ) {
     // No default primary key: Postgres schemas must declare one explicitly.
-    super(name, schema);
+    super(name, schema, undefined, options);
     this.pool = pool as QueryExecutor;
   }
 
-  /** Creates the table and change-notification triggers. Must complete before CRUD. */
+  /** Creates the table, indexes and change-notification triggers. Must complete before CRUD. */
   public async init(): Promise<void> {
     await this.createTable();
+    await this.createIndexes();
     await this.setupTriggers();
   }
 
@@ -54,12 +60,25 @@ export class PostgresModel<T> extends BaseModel<T> {
       if (columnProps.autoIncrement) columnDef += " GENERATED ALWAYS AS IDENTITY";
       if (columnProps.primaryKey) columnDef += " PRIMARY KEY";
       if (columnProps.unique) columnDef += " UNIQUE";
+      if (columnProps.required && !columnProps.primaryKey) columnDef += " NOT NULL";
       columns.push(columnDef);
     }
 
     await this.pool.query(
       `CREATE TABLE IF NOT EXISTS ${quote(this.name)} (${columns.join(", ")});`
     );
+  }
+
+  private async createIndexes(): Promise<void> {
+    for (const [columnName, columnProps] of Object.entries(this.schema)) {
+      if (!columnProps.index || columnProps.primaryKey || columnProps.unique) {
+        continue;
+      }
+      const indexName = quote(`${this.name}_${columnName}_idx`);
+      await this.pool.query(
+        `CREATE INDEX IF NOT EXISTS ${indexName} ON ${quote(this.name)} (${quote(columnName)});`
+      );
+    }
   }
 
   private async setupTriggers(): Promise<void> {
@@ -101,25 +120,33 @@ export class PostgresModel<T> extends BaseModel<T> {
   }
 
   public async create(data: Partial<T>): Promise<T> {
-    const entries = Object.entries(data as Record<string, unknown>);
     this.assertKnownColumns(data as Record<string, unknown>);
+    const withDefaults = this.prepareForCreate(data as Record<string, unknown>);
+    const afterHooks = await this.hooks.runBeforeCreate(
+      withDefaults as Partial<T>
+    );
+    const entries = Object.entries(afterHooks as Record<string, unknown>);
 
+    let row: unknown;
     if (entries.length === 0) {
       const result = await this.pool.query(
         `INSERT INTO ${quote(this.name)} DEFAULT VALUES RETURNING *;`
       );
-      return result.rows[0] as T;
+      row = result.rows[0];
+    } else {
+      const columns = entries.map(([key]) => quote(key)).join(", ");
+      const values = entries.map(([, value]) => value);
+      const placeholders = values.map((_, index) => `$${index + 1}`).join(", ");
+
+      const result = await this.pool.query(
+        `INSERT INTO ${quote(this.name)} (${columns}) VALUES (${placeholders}) RETURNING *;`,
+        values
+      );
+      row = result.rows[0];
     }
 
-    const columns = entries.map(([key]) => quote(key)).join(", ");
-    const values = entries.map(([, value]) => value);
-    const placeholders = values.map((_, index) => `$${index + 1}`).join(", ");
-
-    const result = await this.pool.query(
-      `INSERT INTO ${quote(this.name)} (${columns}) VALUES (${placeholders}) RETURNING *;`,
-      values
-    );
-    return result.rows[0] as T;
+    await this.hooks.runAfterCreate(row as T);
+    return row as T;
   }
 
   public async findAll(
@@ -155,23 +182,29 @@ export class PostgresModel<T> extends BaseModel<T> {
   public async createMany(data: Partial<T>[]): Promise<T[]> {
     if (data.length === 0) return [];
 
-    const first = data[0] as Record<string, unknown>;
-    this.assertKnownColumns(first);
-    const columns = Object.keys(first);
+    // Hooks are skipped for bulk operations (see HookRegistry docs); defaults,
+    // timestamps and required-column validation still apply per row.
+    const prepared = data.map((row) => {
+      const record = row as Record<string, unknown>;
+      this.assertKnownColumns(record);
+      return this.prepareForCreate(record);
+    });
+
+    const columns = Object.keys(prepared[0]!);
     if (columns.length === 0) {
       throw new QueryError("createMany rows must have at least one column");
     }
 
     const values: unknown[] = [];
-    const rowsSql = data.map((row) => {
-      const record = row as Record<string, unknown>;
+    const rowsSql = prepared.map((record) => {
       const keys = Object.keys(record);
       if (
         keys.length !== columns.length ||
         !columns.every((column) => column in record)
       ) {
         throw new QueryError(
-          "createMany requires every row to have the same columns"
+          "createMany requires every row to resolve to the same columns " +
+            "(check for inconsistent optional fields or per-row defaults)"
         );
       }
       const placeholders = columns.map((column) => {
@@ -192,8 +225,9 @@ export class PostgresModel<T> extends BaseModel<T> {
   public async updateMany(where: Where<T>, data: Partial<T>): Promise<number> {
     this.assertKnownColumns(data as Record<string, unknown>);
     this.assertKnownWhereColumns(where as Record<string, unknown>);
+    const stamped = this.prepareForUpdate(data as Record<string, unknown>);
 
-    const entries = Object.entries(data as Record<string, unknown>);
+    const entries = Object.entries(stamped);
     if (entries.length === 0) return 0;
 
     const values = entries.map(([, value]) => value);
@@ -280,8 +314,12 @@ export class PostgresModel<T> extends BaseModel<T> {
 
   public async update(id: unknown, data: Partial<T>): Promise<T | null> {
     this.assertKnownColumns(data as Record<string, unknown>);
-
-    const entries = Object.entries(data as Record<string, unknown>);
+    const stamped = this.prepareForUpdate(data as Record<string, unknown>);
+    const afterHooks = await this.hooks.runBeforeUpdate(
+      id,
+      stamped as Partial<T>
+    );
+    const entries = Object.entries(afterHooks as Record<string, unknown>);
     if (entries.length === 0) {
       return this.findById(id);
     }
@@ -296,14 +334,19 @@ export class PostgresModel<T> extends BaseModel<T> {
       `UPDATE ${quote(this.name)} SET ${updates.join(", ")} WHERE ${quote(this.primaryKey)} = $${values.length} RETURNING *;`,
       values
     );
-    return (result.rows[0] as T) ?? null;
+    const row = (result.rows[0] as T) ?? null;
+    if (row) await this.hooks.runAfterUpdate(row);
+    return row;
   }
 
   public async delete(id: unknown): Promise<T | null> {
+    await this.hooks.runBeforeDelete(id);
     const result = await this.pool.query(
       `DELETE FROM ${quote(this.name)} WHERE ${quote(this.primaryKey)} = $1 RETURNING *;`,
       [id]
     );
-    return (result.rows[0] as T) ?? null;
+    const row = (result.rows[0] as T) ?? null;
+    if (row) await this.hooks.runAfterDelete(row);
+    return row;
   }
 }

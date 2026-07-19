@@ -8,7 +8,7 @@ import {
 } from "mongodb";
 import { DatabaseAdapter } from "../adapter";
 import { MongoModel } from "./mongoModel";
-import { ChangeEvent, ModelSchema, MongoConfig } from "../../types";
+import { ChangeEvent, ModelOptions, ModelSchema, MongoConfig } from "../../types";
 import {
   ConfigurationError,
   ConnectionError,
@@ -48,7 +48,8 @@ export class MongoAdapter extends DatabaseAdapter {
 
   public async defineModel<T>(
     name: string,
-    schema: ModelSchema
+    schema: ModelSchema,
+    options?: ModelOptions
   ): Promise<MongoModel<T>> {
     if (!this.db) {
       throw new ConnectionError("MongoAdapter is not connected");
@@ -56,7 +57,7 @@ export class MongoAdapter extends DatabaseAdapter {
     // Redefining a model reuses the existing handle so we never open a second
     // change stream on the same collection (which would double-broadcast).
     const collection = this.db.collection(name);
-    const model = new MongoModel<T>(name, schema, collection);
+    const model = new MongoModel<T>(name, schema, collection, options);
     const existing = this.models.get(model.name);
     if (existing) {
       if (JSON.stringify(existing.schema) !== JSON.stringify(schema)) {
@@ -67,6 +68,7 @@ export class MongoAdapter extends DatabaseAdapter {
       }
       return existing as MongoModel<T>;
     }
+    await model.init();
     this.models.set(model.name, model as MongoModel<unknown>);
     this.watchCollection(model.name, collection);
     return model;

@@ -12,7 +12,16 @@ export {
   InvalidIdentifierError,
   UnknownColumnError,
   QueryError,
+  ValidationError,
 } from "./errors";
+export type {
+  AfterCreateHook,
+  AfterDeleteHook,
+  AfterUpdateHook,
+  BeforeCreateHook,
+  BeforeDeleteHook,
+  BeforeUpdateHook,
+} from "./models/hooks";
 export type {
   FieldOperators,
   OrderDirection,
@@ -27,6 +36,7 @@ export type {
   ColumnDefinition,
   Config,
   DatabaseConfig,
+  ModelOptions,
   ModelSchema,
   MongoConfig,
   PostgresConfig,

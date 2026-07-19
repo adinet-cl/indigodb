@@ -1,5 +1,11 @@
 import { EventEmitter } from "node:events";
-import { ChangeEvent, Config, DatabaseConfig, ModelSchema } from "./types";
+import {
+  ChangeEvent,
+  Config,
+  DatabaseConfig,
+  ModelOptions,
+  ModelSchema,
+} from "./types";
 import { DatabaseAdapter } from "./adapters/adapter";
 import { PostgresAdapter } from "./adapters/postgres/postgresAdapter";
 import { MongoAdapter } from "./adapters/mongo/mongoAdapter";
@@ -72,12 +78,13 @@ export class IndigoDB extends EventEmitter {
 
   public async defineModel<T>(
     name: string,
-    schema: ModelSchema
+    schema: ModelSchema,
+    options?: ModelOptions
   ): Promise<BaseModel<T>> {
     if (!this.connected) {
       throw new ConnectionError("Call connect() before defining models");
     }
-    return this.adapter.defineModel<T>(name, schema);
+    return this.adapter.defineModel<T>(name, schema, options);
   }
 
   /**

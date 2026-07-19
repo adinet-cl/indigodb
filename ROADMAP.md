@@ -15,13 +15,12 @@ matter — ordered below by dependency and cost.
 | Safe identifiers (anti SQL-injection), typed errors, injectable logger | ✅ v2.0 |
 | Explicit `connect()` / `close()` lifecycle | ✅ v2.0 |
 | **Query engine**: operators (`$gt`, `$in`, `$like`, `$or`, ...), `orderBy` / `limit` / `offset` / `select`, `findOne` / `count` / `exists`, bulk ops (`createMany` / `updateMany` / `deleteMany`), `db.raw()` escape hatch | ✅ v2.1 |
+| **Schema completeness**: `required`, `default` (value or factory), non-unique + unique indexes on both backends, `timestamps` model option | ✅ v2.2 |
+| **Lifecycle hooks**: `beforeCreate`/`afterCreate`/`beforeUpdate`/`afterUpdate`/`beforeDelete`/`afterDelete` via `model.hooks` | ✅ v2.2 |
 | Mocked unit suite (no DB required) + opt-in integration suite | ✅ v2.0 |
 
 ## What's missing (the gaps)
 
-- **Schema features**: `required` / `default` values, automatic timestamps
-  (`createdAt` / `updatedAt`), non-unique indexes, column renames.
-- **Lifecycle hooks**: `beforeCreate`, `afterUpdate`, etc.
 - **Transactions**: atomic multi-operation units with rollback.
 - **Migrations**: `CREATE TABLE IF NOT EXISTS` never alters existing tables —
   schema evolution is manual today.
@@ -32,7 +31,7 @@ matter — ordered below by dependency and cost.
 
 ## Release plan
 
-### v2.2.0 — Schema completo + hooks
+### v2.2.0 — Schema completo + hooks ✅ Done
 - `required` (NOT NULL), `default` values, `index: true` columns.
 - Automatic `createdAt` / `updatedAt` timestamps (opt-in per model).
 - Model hooks: `beforeCreate/afterCreate`, `beforeUpdate/afterUpdate`,
