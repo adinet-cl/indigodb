@@ -1,9 +1,19 @@
 {
   "name": "@adinet/indigodb",
-  "version": "2.4.0",
+  "version": "2.5.0",
   "description": "Lightweight ORM for PostgreSQL and MongoDB with real-time updates over WebSockets",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./client": {
+      "types": "./dist/client/realtimeClient.d.ts",
+      "default": "./dist/client/realtimeClient.js"
+    }
+  },
   "bin": {
     "indigodb-migrate": "dist/cli/migrate.js"
   },

@@ -19,12 +19,11 @@ matter — ordered below by dependency and cost.
 | **Lifecycle hooks**: `beforeCreate`/`afterCreate`/`beforeUpdate`/`afterUpdate`/`beforeDelete`/`afterDelete` via `model.hooks` | ✅ v2.2 |
 | **Transactions**: `db.transaction(async (tx) => ...)` with `tx.getModel()` (shares hooks with the original model), automatic commit/rollback on both backends | ✅ v2.3 |
 | **Migrations**: `MigrationRunner` + `indigodb-migrate` CLI (`up`/`down`/`status`/`create`), history tracked via `defineModel` on both backends | ✅ v2.4 |
+| **Advanced real-time**: filtered subscriptions (`{ type: "subscribe", models, where }`), pluggable `authenticate()`, dependency-free `@adinet/indigodb/client` | ✅ v2.5 |
 | Mocked unit suite (no DB required) + opt-in integration suite | ✅ v2.0 |
 
 ## What's missing (the gaps)
 
-- **Advanced real-time**: per-model/filtered subscriptions, WebSocket
-  authentication, a frontend client library.
 - **Relations**: `hasMany` / `belongsTo`, eager loading (`include` / populate).
 - **Tooling**: ESM + CJS dual build, CI, linting, generated API docs.
 
@@ -51,12 +50,16 @@ matter — ordered below by dependency and cost.
 - Ordering uses an explicit monotonic `sequence` column, not `appliedAt`
   alone — avoids ties when several migrations apply within one DATE tick.
 
-### v2.5.0 — Realtime avanzado
-- Filtered subscriptions: clients subscribe to specific models/criteria over
-  the WebSocket protocol instead of receiving every change.
-- Pluggable WebSocket auth hook (token validation on connection).
-- Lightweight frontend client package (`@adinet/indigodb-client`) with typed
-  events and auto-reconnect.
+### v2.5.0 — Realtime avanzado ✅ Done
+- Filtered subscriptions: clients send `{ type: "subscribe", models?, where? }`
+  over the existing WebSocket connection; `matchesWhere()` evaluates the same
+  operator syntax as the query engine in memory against each `ChangeEvent`.
+- Pluggable `realtime.authenticate(request)` hook — refuse/close (code 4001)
+  before the socket joins the broadcast pool.
+- Frontend client: shipped as the `@adinet/indigodb/client` subpath export
+  (via `package.json` `exports`) rather than a separate `@adinet/indigodb-client`
+  package — same typed-events/auto-reconnect behavior, without a second
+  package to publish and version in lockstep.
 
 ### v3.0.0 — Relaciones
 - Schema-level `references` (FKs in Postgres, ref validation in Mongo).

@@ -87,12 +87,33 @@ describe("IndigoDB", () => {
     expect(WebSocketGateway).not.toHaveBeenCalled();
 
     new IndigoDB({ ...pgConfig, realtime: { enabled: true, port: 9001 } });
-    expect(WebSocketGateway).toHaveBeenCalledWith(9001, expect.anything());
+    expect(WebSocketGateway).toHaveBeenCalledWith(
+      9001,
+      expect.anything(),
+      undefined
+    );
   });
 
   test("realtime port defaults to 8080", () => {
     new IndigoDB({ ...pgConfig, realtime: { enabled: true } });
-    expect(WebSocketGateway).toHaveBeenCalledWith(8080, expect.anything());
+    expect(WebSocketGateway).toHaveBeenCalledWith(
+      8080,
+      expect.anything(),
+      undefined
+    );
+  });
+
+  test("passes the authenticate hook through to the gateway", () => {
+    const authenticate = jest.fn().mockReturnValue(true);
+    new IndigoDB({
+      ...pgConfig,
+      realtime: { enabled: true, authenticate },
+    });
+    expect(WebSocketGateway).toHaveBeenCalledWith(
+      8080,
+      expect.anything(),
+      authenticate
+    );
   });
 
   test("connect starts adapter then gateway; close stops both", async () => {

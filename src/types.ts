@@ -1,3 +1,4 @@
+import type { IncomingMessage } from "node:http";
 import type { Logger } from "./logger";
 import type { DataType } from "./dataTypes";
 
@@ -50,6 +51,12 @@ export interface RealtimeConfig {
   enabled: boolean;
   /** WebSocket server port. Defaults to 8080. */
   port?: number;
+  /**
+   * Called for every incoming WebSocket connection with the raw HTTP upgrade
+   * request (inspect headers, query string, cookies, ...). Return/resolve
+   * `false` to refuse the connection. Omit to accept every connection.
+   */
+  authenticate?: (request: IncomingMessage) => boolean | Promise<boolean>;
 }
 
 export interface Config {
