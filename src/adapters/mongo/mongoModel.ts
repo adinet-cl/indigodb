@@ -168,7 +168,7 @@ export class MongoModel<T> extends BaseModel<T> {
     }
 
     const results = await cursor.toArray();
-    return results as T[];
+    return this.attachIncludes(results as T[], options.include);
   }
 
   public async findOne(

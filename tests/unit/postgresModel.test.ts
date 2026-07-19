@@ -475,3 +475,114 @@ describe("PostgresModel schema completeness", () => {
     expect(beforeCreateCalls).toHaveLength(0);
   });
 });
+
+describe("PostgresModel relations", () => {
+  interface RelUser {
+    id: number;
+    name: string;
+  }
+  interface RelPost {
+    id: number;
+    title: string;
+    userId: number;
+  }
+
+  const relUserSchema: ModelSchema = {
+    id: { type: DataTypes.INTEGER, primaryKey: true },
+    name: { type: DataTypes.STRING },
+  };
+  const relPostSchema: ModelSchema = {
+    id: { type: DataTypes.INTEGER, primaryKey: true },
+    title: { type: DataTypes.STRING },
+    userId: { type: DataTypes.INTEGER, references: { model: "users" } },
+  };
+
+  test("createTable emits a REFERENCES constraint for a references column", async () => {
+    const pool = makePool();
+    const model = new PostgresModel<RelPost>("posts", relPostSchema, pool);
+    await model.init();
+    const createTableSql = pool.query.mock.calls[0][0] as string;
+    expect(createTableSql).toContain('"userId" INTEGER REFERENCES "users" ("id")');
+  });
+
+  test("createTable rejects unsafe references.model values", async () => {
+    const pool = makePool();
+    const badSchema: ModelSchema = {
+      id: { type: DataTypes.INTEGER, primaryKey: true },
+      userId: {
+        type: DataTypes.INTEGER,
+        references: { model: "users; DROP TABLE users;--" },
+      },
+    };
+    const model = new PostgresModel("posts", badSchema, pool);
+    await expect(model.init()).rejects.toThrow(InvalidIdentifierError);
+  });
+
+  test("hasMany + include batches a single query per association and attaches results", async () => {
+    const usersPool = makePool([
+      { id: 1, name: "Ada" },
+      { id: 2, name: "Bob" },
+    ]);
+    const users = new PostgresModel<RelUser>("users", relUserSchema, usersPool);
+
+    const postsPool = makePool([
+      { id: 10, title: "Post A", userId: 1 },
+      { id: 11, title: "Post B", userId: 1 },
+      { id: 12, title: "Post C", userId: 2 },
+    ]);
+    const posts = new PostgresModel<RelPost>("posts", relPostSchema, postsPool);
+
+    users.hasMany(posts, { foreignKey: "userId", as: "posts" });
+
+    const result = await users.findAll({}, { include: ["posts"] });
+
+    expect(postsPool.query).toHaveBeenCalledTimes(1);
+    expect((result[0] as unknown as { posts: unknown }).posts).toEqual([
+      { id: 10, title: "Post A", userId: 1 },
+      { id: 11, title: "Post B", userId: 1 },
+    ]);
+    expect((result[1] as unknown as { posts: unknown }).posts).toEqual([
+      { id: 12, title: "Post C", userId: 2 },
+    ]);
+  });
+
+  test("belongsTo + include attaches a single related record or null", async () => {
+    const usersPool = makePool([{ id: 1, name: "Ada" }]);
+    const users = new PostgresModel<RelUser>("users", relUserSchema, usersPool);
+
+    const postsPool = makePool([
+      { id: 10, title: "Post A", userId: 1 },
+      { id: 11, title: "Orphan", userId: 99 },
+    ]);
+    const posts = new PostgresModel<RelPost>("posts", relPostSchema, postsPool);
+
+    posts.belongsTo(users, { foreignKey: "userId", as: "author" });
+
+    const result = await posts.findAll({}, { include: ["author"] });
+
+    expect((result[0] as unknown as { author: unknown }).author).toEqual({
+      id: 1,
+      name: "Ada",
+    });
+    expect((result[1] as unknown as { author: unknown }).author).toBeNull();
+  });
+
+  test("findAll rejects an unregistered include name", async () => {
+    const pool = makePool();
+    const model = new PostgresModel<RelPost>("posts", relPostSchema, pool);
+    await expect(model.findAll({}, { include: ["nope"] })).rejects.toThrow(
+      ConfigurationError
+    );
+  });
+
+  test("include is a no-op for an empty result set (no extra query issued)", async () => {
+    const usersPool = makePool([]);
+    const users = new PostgresModel<RelUser>("users", relUserSchema, usersPool);
+    const postsPool = makePool([]);
+    const posts = new PostgresModel<RelPost>("posts", relPostSchema, postsPool);
+    users.hasMany(posts, { foreignKey: "userId", as: "posts" });
+
+    await users.findAll({}, { include: ["posts"] });
+    expect(postsPool.query).not.toHaveBeenCalled();
+  });
+});

@@ -16,15 +16,23 @@ interface TestUser {
   email: string;
 }
 
+interface TestPost {
+  id: number;
+  title: string;
+  userId: number;
+}
+
 const RUN = process.env.INDIGODB_INTEGRATION === "1";
 const describeIntegration = RUN ? describe : describe.skip;
 
 const WS_PORT = Number(process.env.PG_TEST_WS_PORT ?? 8091);
 const TABLE = "indigodb_it_users";
+const POSTS_TABLE = "indigodb_it_posts";
 
 describeIntegration("PostgreSQL integration", () => {
   let db: IndigoDB;
   let model: BaseModel<TestUser>;
+  let posts: BaseModel<TestPost>;
 
   beforeAll(async () => {
     db = new IndigoDB({
@@ -44,6 +52,14 @@ describeIntegration("PostgreSQL integration", () => {
       name: { type: DataTypes.STRING },
       email: { type: DataTypes.STRING, unique: true },
     });
+    // References TABLE, so it must be defined after it (FK target must exist).
+    posts = await db.defineModel<TestPost>(POSTS_TABLE, {
+      id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+      title: { type: DataTypes.STRING },
+      userId: { type: DataTypes.INTEGER, references: { model: TABLE } },
+    });
+    model.hasMany(posts, { foreignKey: "userId", as: "posts" });
+    posts.belongsTo(model, { foreignKey: "userId", as: "author" });
   });
 
   afterAll(async () => {
@@ -157,5 +173,39 @@ describeIntegration("PostgreSQL integration", () => {
     expect(rolledBack).toBeNull();
 
     await model.deleteMany({ email: { $like: `tx-%-${stamp}@%` } } as never);
+  });
+
+  test("relations: hasMany/belongsTo eager loading via include", async () => {
+    const stamp = Date.now();
+    const author = await model.create({
+      name: "rel_author",
+      email: `rel-${stamp}@example.com`,
+    } as Partial<TestUser>);
+
+    await posts.createMany([
+      { title: "Post A", userId: (author as TestUser).id },
+      { title: "Post B", userId: (author as TestUser).id },
+    ] as Partial<TestPost>[]);
+
+    const usersWithPosts = await model.findAll(
+      { id: (author as TestUser).id } as never,
+      { include: ["posts"] }
+    );
+    expect(
+      (usersWithPosts[0] as unknown as { posts: TestPost[] }).posts
+    ).toHaveLength(2);
+
+    const postsWithAuthor = await posts.findAll(
+      { userId: (author as TestUser).id } as never,
+      { include: ["author"] }
+    );
+    for (const post of postsWithAuthor) {
+      expect(
+        (post as unknown as { author: TestUser }).author.email
+      ).toBe(`rel-${stamp}@example.com`);
+    }
+
+    await posts.deleteMany({ userId: (author as TestUser).id } as never);
+    await model.delete((author as TestUser).id);
   });
 });
