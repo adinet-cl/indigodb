@@ -1,213 +1,200 @@
-# **IndigoDB**
+# IndigoDB
 
-IndigoDB is a lightweight ORM for Node.js, supporting both PostgreSQL and MongoDB with real-time updates through WebSockets. Inspired by Firebase's real-time database functionality, IndigoDB simplifies API creation by abstracting database operations and providing built-in support for real-time data synchronization.
+IndigoDB is a lightweight ORM for Node.js that works against **either PostgreSQL or MongoDB**, with real-time change notifications pushed to clients over a built-in WebSocket server. It's inspired by Firebase's real-time database behavior: define a model, run CRUD, and connected clients are notified of every insert/update/delete automatically.
 
-## **Features**
+> **v2.0.0 is a full rewrite** with a new instance-based API, opt-in real-time, typed models, and a pluggable adapter architecture. See the [Migration guide](#migration-from-v1) if you are upgrading from v1.
 
-- **Dual Database Support**: Works seamlessly with PostgreSQL and MongoDB.
-- **Real-Time Updates**: Synchronizes database changes in real-time using WebSockets.
-- **Simple API**: Developers can focus on logic without worrying about database or WebSocket configuration.
-- **TypeScript Support**: Fully typed for improved developer experience.
-- **Schema-Based Models**: Define models and let IndigoDB handle the rest (CRUD, real-time updates, etc.).
+## Features
 
----
+- **Dual database support** — one API over PostgreSQL and MongoDB, swapped by config.
+- **Real-time updates (opt-in)** — Postgres triggers + `LISTEN/NOTIFY` and MongoDB change streams are fanned out to WebSocket clients through a uniform payload.
+- **Fully typed** — `defineModel<T>()` returns a typed `Model<T>`; no `any` leaking into your code.
+- **Safe by default** — table/column identifiers are validated (anti SQL-injection) and all values are parameterized.
+- **Explicit lifecycle** — `connect()` / `close()` cleanly open and release every resource (pool, listener, change streams, WebSocket server).
+- **Injectable logger** — the library is silent unless you pass a `Logger`.
 
-## **Installation**
-
-### **Backend (Node.js)**
-
-To use IndigoDB in your Node.js backend project:
+## Installation
 
 ```bash
-npm install indigodb
+npm install @adinet/indigodb
 ```
 
-### **Frontend (Angular)** _(Optional for Real-Time Frontend Integration)_
+`pg`, `mongodb`, and `ws` are regular runtime dependencies — no extra peer installs required.
 
-Coming soon...
+## Quick start
 
----
+```typescript
+import { IndigoDB, DataTypes } from "@adinet/indigodb";
 
-## **Getting Started**
+interface User {
+  id: number;
+  name: string;
+  email: string;
+}
 
-### **Backend Setup**
+const db = new IndigoDB({
+  database: {
+    type: "postgresql",
+    host: "localhost",
+    port: 5432,
+    user: "db_user",
+    password: "db_password",
+    database: "db_name",
+  },
+  realtime: { enabled: true, port: 8080 }, // omit to skip the WebSocket server
+});
 
-1. **Initialize IndigoDB**:
-   Use the `initialize` function to configure your database and WebSocket server.
+await db.connect();
 
-   ```typescript
-   import { initialize, defineModel, DataTypes } from "indigodb";
+const Users = await db.defineModel<User>("users", {
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  name: { type: DataTypes.STRING },
+  email: { type: DataTypes.STRING, unique: true },
+});
 
-   // Initialize the ORM
-   await initialize({
-     databaseType: "postgresql", // or 'mongodb'
-     host: "localhost",
-     port: 5432, // MongoDB users should provide `connectionString` instead
-     user: "db_user",
-     password: "db_password",
-     database: "db_name",
-     websocketPort: 8080, // WebSocket server port
-   });
-   ```
+const user = await Users.create({ name: "John Doe", email: "john@example.com" });
+const all = await Users.findAll();
+const byId = await Users.findById(user.id);
+await Users.update(user.id, { name: "Jane Doe" });
+await Users.delete(user.id);
 
-2. **Define a Model**:
-   Define your models with schemas.
+// In-process subscription to every change (works even without WebSockets):
+db.on("change", (event) => {
+  console.log(event); // { model, operation: "INSERT" | "UPDATE" | "DELETE", data }
+});
 
-   ```typescript
-   interface User {
-     id: number;
-     name: string;
-     email: string;
-   }
+await db.close(); // releases the pool, listener, change streams and WS server
+```
 
-   const UserModel = defineModel<User>("users", {
-     id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
-     name: { type: DataTypes.STRING },
-     email: { type: DataTypes.STRING, unique: true },
-   });
-   ```
+### MongoDB
 
-3. **Perform CRUD Operations**:
-   Use the model to interact with your database.
+```typescript
+const db = new IndigoDB({
+  database: {
+    type: "mongodb",
+    connectionString: "mongodb://localhost:27017/mydb",
+  },
+  realtime: { enabled: true, port: 8080 },
+});
+```
 
-   ```typescript
-   // Create a new user
-   const user = await UserModel.create({
-     name: "John Doe",
-     email: "john.doe@example.com",
-   });
+MongoDB documents use `_id` as the primary key automatically; string ids that look like an `ObjectId` are converted for you. Change streams require the MongoDB deployment to be a **replica set**.
 
-   // Find all users
-   const users = await UserModel.findAll();
+## Real-time frontend integration
 
-   // Update a user
-   const updatedUser = await UserModel.update(user.id, { name: "Jane Doe" });
+Connect to the WebSocket server and listen for updates:
 
-   // Delete a user
-   await UserModel.delete(user.id);
-   ```
+```typescript
+const socket = new WebSocket("ws://localhost:8080");
 
-### **Real-Time Frontend Integration**
+socket.onmessage = (event) => {
+  const { event: name, data } = JSON.parse(event.data);
+  // name === "databaseUpdate"
+  // data === { model, operation, data }
+  console.log("Real-time update:", data);
+};
+```
 
-IndigoDB provides built-in real-time updates through WebSockets. Any changes in the database (insert, update, delete) are sent to connected clients.
+The payload shape is identical whether the change originated in PostgreSQL or MongoDB, so a single frontend handler covers both backends.
 
-1. **Connect to WebSocket**:
-   On the frontend, connect to the WebSocket server:
+## API reference
 
-   ```typescript
-   const socket = new WebSocket("ws://localhost:8080");
+### `new IndigoDB(config)`
 
-   socket.onmessage = (event) => {
-     const message = JSON.parse(event.data);
-     console.log("Real-time update:", message);
-   };
-   ```
+| Config field | Description |
+| --- | --- |
+| `database` | Discriminated by `type`. PostgreSQL: `{ type: "postgresql", host, port, user, password, database }` (or `connectionString`). MongoDB: `{ type: "mongodb", connectionString, database? }`. |
+| `realtime` | Optional. `{ enabled: boolean, port?: number }` — defaults to port `8080`. When omitted or `enabled: false`, **no WebSocket server is started**. |
+| `logger` | Optional `Logger`. Defaults to a no-op; pass `consoleLogger` (exported) or your own. |
 
-2. **Receive Updates**:
-   Handle real-time updates in your frontend application.
+### Methods
 
----
+- **`connect(): Promise<void>`** — connects the adapter (fails fast on bad credentials) and starts the WebSocket server if real-time is enabled.
+- **`defineModel<T>(name, schema): Promise<Model<T>>`** — creates the table/collection (and Postgres triggers) and resolves once it is ready. **Async** — always `await` it.
+- **`on("change", listener)`** — subscribe to `ChangeEvent`s in-process (inherited from `EventEmitter`).
+- **`close(): Promise<void>`** — stops the WebSocket server, closes change streams, and drains the connection pool / client.
 
-## **API Reference**
+### Model methods
 
-### **Backend**
+| Method | Description |
+| --- | --- |
+| `create(data)` | Insert a record; returns the created row. |
+| `findAll(criteria?)` | Return all records matching an optional equality filter. |
+| `findById(id)` | Return a record by its primary key, or `null`. |
+| `update(id, data)` | Update by primary key; returns the updated row or `null`. |
+| `delete(id)` | Delete by primary key; returns the deleted row or `null`. |
 
-#### `initialize(config: Config): Promise<void>`
+The primary key is taken from the column marked `primaryKey: true` in the schema (PostgreSQL), or defaults to `_id` (MongoDB).
 
-Initializes the ORM with database and WebSocket configurations.
+## Supported data types
 
-- `config`:
-  - `databaseType`: `'postgresql'` or `'mongodb'`
-  - `host`, `port`, `user`, `password`, `database` (PostgreSQL)
-  - `connectionString` (MongoDB)
-  - `websocketPort`: Port for the WebSocket server
+| IndigoDB type | PostgreSQL | MongoDB |
+| --- | --- | --- |
+| `INTEGER` | `INTEGER` | `Number` |
+| `STRING` | `VARCHAR(255)` | `String` |
+| `FLOAT` | `REAL` | `Number` |
+| `BOOLEAN` | `BOOLEAN` | `Boolean` |
+| `DATE` | `TIMESTAMP` | `Date` |
+| `TEXT` | `TEXT` | `String` |
+| `JSON` | `JSONB` | `Object` |
 
-#### `defineModel<T>(name: string, schema: ModelSchema): Model<T>`
+## Architecture
 
-Defines a model with the given schema.
+IndigoDB is intentionally small and built around a few classic patterns so new backends and transports are easy to add:
 
-- `name`: Name of the database table/collection.
-- `schema`: Object defining the model schema, including types and constraints.
+- **Adapter** — `DatabaseAdapter` has one implementation per backend (`PostgresAdapter`, `MongoAdapter`). `IndigoDB` never contains `if (type === ...)` CRUD branches.
+- **Template Method** — `BaseModel<T>` defines the CRUD contract and centralizes identifier/schema validation and primary-key resolution; each backend model fills in the specifics.
+- **Observer** — adapters emit a uniform `ChangeEvent`; `IndigoDB` re-emits it and forwards it to the real-time gateway.
+- **Strategy** — `RealtimeGateway` abstracts the transport; `WebSocketGateway` is the default, and real-time is fully optional.
 
-#### **Model Methods**
+```
+adapter.emitChange() ──▶ IndigoDB.emit("change") ──▶ your listener
+                                    └────────────▶ gateway.broadcast() ──▶ WebSocket clients
+```
 
-1. **`create(data: Partial<T>): Promise<T>`**
-   Creates a new record in the database.
+- **PostgreSQL** detects changes with a per-table trigger that calls `pg_notify` on the `indigodb_changes` channel; a dedicated `LISTEN` client (separate from the query `Pool`) receives them.
+- **MongoDB** detects changes with a `collection.watch()` change stream (requires a replica set).
 
-2. **`findAll(criteria?: Partial<T>): Promise<T[]>`**
-   Retrieves all records matching the criteria.
+## Testing
 
-3. **`findById(id: any): Promise<T | null>`**
-   Retrieves a record by its ID.
-
-4. **`update(id: any, data: Partial<T>): Promise<T | null>`**
-   Updates a record by its ID.
-
-5. **`delete(id: any): Promise<T | null>`**
-   Deletes a record by its ID.
-
----
-
-## **Supported Data Types**
-
-IndigoDB supports the following data types:
-
-| IndigoDB Type | PostgreSQL Type | MongoDB Type |
-| ------------- | --------------- | ------------ |
-| `INTEGER`     | `INTEGER`       | `Number`     |
-| `STRING`      | `VARCHAR(255)`  | `String`     |
-| `FLOAT`       | `REAL`          | `Number`     |
-| `BOOLEAN`     | `BOOLEAN`       | `Boolean`    |
-| `DATE`        | `TIMESTAMP`     | `Date`       |
-| `TEXT`        | `TEXT`          | `String`     |
-| `JSON`        | `JSON`          | `Object`     |
-
----
-
-## **Real-Time Updates**
-
-IndigoDB uses PostgreSQL triggers and MongoDB change streams to send real-time updates to connected WebSocket clients.
-
-### **PostgreSQL Setup**
-
-IndigoDB automatically creates triggers for your models to notify changes via `pg_notify`.
-
-### **MongoDB Setup**
-
-Ensure MongoDB is running as a replica set to enable change streams.
-
----
-
-## **Testing**
-
-To run tests, make sure you have `jest` and the required database instances running. Use the following command:
+The default suite is fully mocked and needs **no database**:
 
 ```bash
 npm test
 ```
 
----
+Opt-in integration tests run against live databases. Copy `.env.example` to `.env`, fill in your connection details, then:
 
-## **Roadmap**
+```bash
+npm run test:integration
+```
 
-- Add support for other databases (e.g., MySQL, SQLite).
-- Provide a frontend library for Angular with full TypeScript support.
-- Improve real-time capabilities with custom WebSocket events.
+## Migration from v1
 
----
+v2 is a breaking change. Key differences:
 
-## **Contributing**
+| v1 | v2 |
+| --- | --- |
+| `import { initialize, defineModel } from "indigodb"` (hidden singleton) | `import { IndigoDB } from "@adinet/indigodb"; const db = new IndigoDB(config)` |
+| `initialize({ databaseType, host, ... })` | `new IndigoDB({ database: { type, host, ... } })` + `await db.connect()` |
+| `defineModel()` was synchronous and returned `any` | `await db.defineModel<T>()` returns a typed `Model<T>` |
+| WebSocket server always started | `realtime` is opt-in |
+| Postgres records required a hardcoded `_id` column | primary key comes from the `primaryKey: true` column in your schema |
+| No way to shut down (tests hung) | `await db.close()` releases everything |
 
-We welcome contributions! Please follow these steps:
+## Roadmap
+
+- Additional adapters (MySQL, SQLite).
+- Additional real-time gateways (SSE, socket.io).
+- Query builder / richer filtering beyond equality.
+
+## Contributing
 
 1. Fork the repository.
-2. Create a new branch (`feature/my-new-feature`).
-3. Commit your changes (`git commit -m 'Add my feature'`).
-4. Push to the branch (`git push origin feature/my-new-feature`).
-5. Open a pull request.
+2. Create a branch (`feature/my-feature`).
+3. Commit your changes.
+4. Push and open a pull request.
 
----
+## License
 
-## **License**
-
-This project is licensed under the MIT License. See the [LICENSE](./LICENSE) file for details.
+MIT — see [LICENSE](./LICENSE).
