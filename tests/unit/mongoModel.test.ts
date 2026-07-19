@@ -1,7 +1,7 @@
 import { ObjectId } from "mongodb";
 import { MongoModel } from "../../src/adapters/mongo/mongoModel";
 import { DataTypes } from "../../src/dataTypes";
-import { UnknownColumnError } from "../../src/errors";
+import { UnknownColumnError, ValidationError } from "../../src/errors";
 import { ModelSchema } from "../../src/types";
 
 interface Product {
@@ -30,6 +30,7 @@ function makeCollection() {
     deleteOne: jest.fn().mockResolvedValue({ deletedCount: 1 }),
     deleteMany: jest.fn().mockResolvedValue({ deletedCount: 0 }),
     countDocuments: jest.fn().mockResolvedValue(0),
+    createIndex: jest.fn().mockResolvedValue("index-name"),
   };
 }
 
@@ -282,5 +283,134 @@ describe("MongoModel", () => {
 
     await expect(model.deleteMany({ inStock: false })).resolves.toBe(2);
     expect(collection.deleteMany).toHaveBeenCalledWith({ inStock: false });
+  });
+});
+
+describe("MongoModel schema completeness", () => {
+  interface Account {
+    _id?: unknown;
+    email: string;
+    plan: string;
+    createdAt?: Date;
+    updatedAt?: Date;
+  }
+
+  const accountSchema: ModelSchema = {
+    email: { type: DataTypes.STRING, required: true, unique: true },
+    plan: { type: DataTypes.STRING, default: "free" },
+  };
+
+  test("init creates a unique index for unique columns and a plain one for index columns", async () => {
+    const schema: ModelSchema = {
+      email: { type: DataTypes.STRING, unique: true },
+      status: { type: DataTypes.STRING, index: true },
+      plain: { type: DataTypes.STRING },
+    };
+    const collection = makeCollection();
+    const model = new MongoModel("accounts", schema, collection as never);
+
+    await model.init();
+
+    expect(collection.createIndex).toHaveBeenCalledWith(
+      { email: 1 },
+      { unique: true }
+    );
+    expect(collection.createIndex).toHaveBeenCalledWith({ status: 1 });
+    expect(collection.createIndex).toHaveBeenCalledTimes(2);
+  });
+
+  test("create applies default values for missing fields", async () => {
+    const collection = makeCollection();
+    const inserted = { _id: new ObjectId(), email: "a@x.com", plan: "free" };
+    collection.findOne.mockResolvedValue(inserted);
+    const model = new MongoModel<Account>("accounts", accountSchema, collection as never);
+
+    await model.create({ email: "a@x.com" });
+
+    expect(collection.insertOne).toHaveBeenCalledWith({
+      email: "a@x.com",
+      plan: "free",
+    });
+  });
+
+  test("create throws ValidationError when a required field is missing", async () => {
+    const collection = makeCollection();
+    const model = new MongoModel<Account>("accounts", accountSchema, collection as never);
+    await expect(model.create({ plan: "pro" })).rejects.toThrow(ValidationError);
+  });
+
+  test("timestamps: create stamps createdAt/updatedAt and update refreshes updatedAt", async () => {
+    const collection = makeCollection();
+    collection.findOne.mockResolvedValue({ _id: new ObjectId() });
+    const model = new MongoModel<Account>("accounts", accountSchema, collection as never, {
+      timestamps: true,
+    });
+
+    await model.create({ email: "a@x.com" });
+    const inserted = collection.insertOne.mock.calls[0][0];
+    expect(inserted.createdAt).toBeInstanceOf(Date);
+    expect(inserted.updatedAt).toBeInstanceOf(Date);
+
+    await model.update(new ObjectId(), { plan: "pro" });
+    const updateArgs = collection.updateOne.mock.calls[0][1];
+    expect(updateArgs.$set.updatedAt).toBeInstanceOf(Date);
+  });
+
+  test("hooks: beforeCreate can transform the payload, afterCreate observes the record", async () => {
+    const collection = makeCollection();
+    const inserted = { _id: new ObjectId(), email: "a@x.com", plan: "free" };
+    collection.findOne.mockResolvedValue(inserted);
+    const model = new MongoModel<Account>("accounts", accountSchema, collection as never);
+
+    const afterCreateCalls: Account[] = [];
+    model.hooks.beforeCreate((data) => ({
+      email: (data.email as string).toLowerCase(),
+    }));
+    model.hooks.afterCreate((record) => {
+      afterCreateCalls.push(record);
+    });
+
+    await model.create({ email: "A@X.COM" });
+
+    expect(collection.insertOne).toHaveBeenCalledWith({
+      email: "a@x.com",
+      plan: "free",
+    });
+    expect(afterCreateCalls).toEqual([inserted]);
+  });
+
+  test("hooks: beforeDelete/afterDelete run around delete()", async () => {
+    const collection = makeCollection();
+    const existing = { _id: new ObjectId(), email: "a@x.com", plan: "free" };
+    collection.findOne.mockResolvedValue(existing);
+    const model = new MongoModel<Account>("accounts", accountSchema, collection as never);
+
+    const events: string[] = [];
+    model.hooks.beforeDelete((id) => {
+      events.push(`before:${id}`);
+    });
+    model.hooks.afterDelete((record) => {
+      events.push(`after:${record.email}`);
+    });
+
+    await model.delete(existing._id);
+    expect(events).toEqual([`before:${existing._id}`, "after:a@x.com"]);
+  });
+
+  test("createMany applies defaults per row and skips hooks", async () => {
+    const collection = makeCollection();
+    const model = new MongoModel<Account>("accounts", accountSchema, collection as never);
+    const beforeCreateCalls: unknown[] = [];
+    model.hooks.beforeCreate((data) => {
+      beforeCreateCalls.push(data);
+    });
+
+    await model.createMany([{ email: "a@x.com" }, { email: "b@x.com" }]);
+
+    expect(collection.insertMany).toHaveBeenCalledWith([
+      { email: "a@x.com", plan: "free" },
+      { email: "b@x.com", plan: "free" },
+    ]);
+    expect(beforeCreateCalls).toHaveLength(0);
   });
 });

@@ -1,7 +1,14 @@
-import { ModelSchema } from "../types";
+import { ModelOptions, ModelSchema } from "../types";
 import { assertValidIdentifier } from "../identifiers";
-import { ConfigurationError, UnknownColumnError } from "../errors";
+import {
+  ConfigurationError,
+  UnknownColumnError,
+  ValidationError,
+} from "../errors";
 import { QueryOptions, walkWhere, Where } from "../query/where";
+import { HookRegistry } from "./hooks";
+
+export const TIMESTAMP_COLUMNS = ["createdAt", "updatedAt"] as const;
 
 /**
  * Template Method base for all database models: guarantees the same CRUD
@@ -12,17 +19,27 @@ export abstract class BaseModel<T> {
   public readonly name: string;
   public readonly schema: ModelSchema;
   public readonly primaryKey: string;
+  public readonly timestamps: boolean;
+  public readonly hooks = new HookRegistry<T>();
 
   protected constructor(
     name: string,
     schema: ModelSchema,
-    defaultPrimaryKey?: string
+    defaultPrimaryKey?: string,
+    options: ModelOptions = {}
   ) {
     this.name = assertValidIdentifier(name);
     for (const column of Object.keys(schema)) {
       assertValidIdentifier(column);
     }
-    this.schema = schema;
+    this.timestamps = options.timestamps ?? false;
+    this.schema = this.timestamps
+      ? {
+          ...schema,
+          createdAt: { type: "DATE" },
+          updatedAt: { type: "DATE" },
+        }
+      : schema;
 
     const declaredPrimaryKey = Object.entries(schema).find(
       ([, definition]) => definition.primaryKey
@@ -34,6 +51,51 @@ export abstract class BaseModel<T> {
       );
     }
     this.primaryKey = primaryKey;
+  }
+
+  /** Fills in `default` values for columns missing from the payload. */
+  protected applyDefaults(data: Record<string, unknown>): Record<string, unknown> {
+    const result = { ...data };
+    for (const [column, definition] of Object.entries(this.schema)) {
+      if (result[column] === undefined && definition.default !== undefined) {
+        result[column] =
+          typeof definition.default === "function"
+            ? definition.default()
+            : definition.default;
+      }
+    }
+    return result;
+  }
+
+  /** Throws ValidationError for `required` columns still missing after defaults. */
+  protected assertRequiredColumns(data: Record<string, unknown>): void {
+    for (const [column, definition] of Object.entries(this.schema)) {
+      if (
+        definition.required &&
+        (data[column] === undefined || data[column] === null)
+      ) {
+        throw new ValidationError(column, this.name);
+      }
+    }
+  }
+
+  /** Applies defaults + required validation; the shared create()-time pipeline. */
+  protected prepareForCreate(
+    data: Record<string, unknown>
+  ): Record<string, unknown> {
+    const withDefaults = this.applyDefaults(data);
+    const withTimestamps = this.timestamps
+      ? { ...withDefaults, createdAt: new Date(), updatedAt: new Date() }
+      : withDefaults;
+    this.assertRequiredColumns(withTimestamps);
+    return withTimestamps;
+  }
+
+  /** Stamps `updatedAt` on update() payloads when timestamps are enabled. */
+  protected prepareForUpdate(
+    data: Record<string, unknown>
+  ): Record<string, unknown> {
+    return this.timestamps ? { ...data, updatedAt: new Date() } : data;
   }
 
   /** Rejects payload keys that are not part of the schema. */

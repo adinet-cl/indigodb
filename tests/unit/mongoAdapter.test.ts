@@ -7,6 +7,7 @@ const mockCollection = {
   find: jest.fn(),
   updateOne: jest.fn(),
   deleteOne: jest.fn(),
+  createIndex: jest.fn().mockResolvedValue("index-name"),
 };
 
 const mockDb = {

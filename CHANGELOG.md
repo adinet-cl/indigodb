@@ -4,6 +4,31 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.0] - 2026-07-19
+
+Schema completeness + lifecycle hooks. Fully backward compatible with v2.1.
+
+### Added
+
+- **`ColumnDefinition`**: `required` (NOT NULL on Postgres, validated on both
+  backends), `default` (static value or a zero-arg factory function, applied
+  when the column is omitted on `create()`/`createMany()`), `index` (creates
+  a non-unique index; `unique` now also creates a unique index on MongoDB,
+  where it previously had no effect).
+- **`ModelOptions.timestamps`**: opt-in per model via
+  `defineModel(name, schema, { timestamps: true })`. Adds managed
+  `createdAt`/`updatedAt` columns — stamped on `create()`, refreshed on
+  `update()`/`updateMany()`.
+- **Lifecycle hooks** via `model.hooks`: `beforeCreate`, `afterCreate`,
+  `beforeUpdate`, `afterUpdate`, `beforeDelete`, `afterDelete`. `before*`
+  hooks may return a partial payload to merge into the pending data. Hooks
+  run for single-row `create()`/`update()`/`delete()` only — bulk operations
+  (`createMany`/`updateMany`/`deleteMany`) skip them by default (same
+  convention as Sequelize) so a bulk call doesn't silently re-fetch every
+  affected row.
+- `ValidationError` for missing `required` columns; exported hook types
+  (`BeforeCreateHook`, `AfterCreateHook`, ...) and `ModelOptions`.
+
 ## [2.1.0] - 2026-07-19
 
 Query engine release. Fully backward compatible with v2.0 — plain equality

@@ -6,10 +6,24 @@ export interface ColumnDefinition {
   primaryKey?: boolean;
   autoIncrement?: boolean;
   unique?: boolean;
+  /** Rejects create() calls missing this column (after defaults are applied). */
+  required?: boolean;
+  /** Static value or a factory invoked per row when the column is omitted on create(). */
+  default?: unknown | (() => unknown);
+  /** Creates a non-unique index on this column. */
+  index?: boolean;
 }
 
 export interface ModelSchema {
   [column: string]: ColumnDefinition;
+}
+
+export interface ModelOptions {
+  /**
+   * Adds and manages `createdAt`/`updatedAt` DATE columns automatically:
+   * set on create(), refreshed on update(). Defaults to false.
+   */
+  timestamps?: boolean;
 }
 
 export interface PostgresConfig {
