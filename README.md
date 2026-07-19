@@ -1,13 +1,22 @@
 # IndigoDB
 
+[![CI](https://github.com/Adinet-CL/indigodb/actions/workflows/ci.yml/badge.svg)](https://github.com/Adinet-CL/indigodb/actions/workflows/ci.yml)
+[![npm version](https://img.shields.io/npm/v/%40adinet%2Findigodb)](https://www.npmjs.com/package/@adinet/indigodb)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
+
 IndigoDB is a lightweight ORM for Node.js that works against **either PostgreSQL or MongoDB**, with real-time change notifications pushed to clients over a built-in WebSocket server. It's inspired by Firebase's real-time database behavior: define a model, run CRUD, and connected clients are notified of every insert/update/delete automatically.
 
-> **v2.0.0 is a full rewrite** with a new instance-based API, opt-in real-time, typed models, and a pluggable adapter architecture. See the [Migration guide](#migration-from-v1) if you are upgrading from v1.
+> **v2+ is a full rewrite** with a new instance-based API, opt-in real-time, typed models, and a pluggable adapter architecture. See the [Migration guide](#migration-from-v1) if you are upgrading from v1.
 
 ## Features
 
 - **Dual database support** — one API over PostgreSQL and MongoDB, swapped by config.
-- **Real-time updates (opt-in)** — Postgres triggers + `LISTEN/NOTIFY` and MongoDB change streams are fanned out to WebSocket clients through a uniform payload.
+- **Rich query engine** — Mongo-style operators (`$gt`, `$in`, `$like`, `$or`, ...), pagination, projection, bulk operations, and a `raw()` escape hatch.
+- **Relations** — `hasMany` / `belongsTo` with batched eager loading via `include`.
+- **Transactions** — `db.transaction()` with automatic commit/rollback on both backends.
+- **Migrations** — `indigodb-migrate` CLI + programmatic `MigrationRunner`.
+- **Real-time updates (opt-in)** — Postgres triggers + `LISTEN/NOTIFY` and MongoDB change streams are fanned out to WebSocket clients, with filtered subscriptions, pluggable auth, and a dependency-free frontend client.
+- **Schema features** — `required`, `default`, indexes, automatic timestamps, lifecycle hooks.
 - **Fully typed** — `defineModel<T>()` returns a typed `Model<T>`; no `any` leaking into your code.
 - **Safe by default** — table/column identifiers are validated (anti SQL-injection) and all values are parameterized.
 - **Explicit lifecycle** — `connect()` / `close()` cleanly open and release every resource (pool, listener, change streams, WebSocket server).
@@ -388,10 +397,20 @@ The default suite is fully mocked and needs **no database**:
 npm test
 ```
 
-Opt-in integration tests run against live databases. Copy `.env.example` to `.env`, fill in your connection details, then:
+Opt-in integration tests run against live databases (PostgreSQL, and MongoDB as a replica set). Copy `.env.example` to `.env`, fill in your connection details, then:
 
 ```bash
 npm run test:integration
+```
+
+CI runs the unit suite on Node 18/20/22 and the full integration suite against real Postgres and Mongo (single-node replica set) containers on every PR.
+
+## Development
+
+```bash
+npm run lint     # ESLint + Prettier check
+npm run format   # Prettier write
+npm run docs     # Generate API docs (typedoc) into docs/
 ```
 
 ## Migration from v1

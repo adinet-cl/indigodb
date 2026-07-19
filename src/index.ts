@@ -17,6 +17,7 @@ export {
   QueryError,
   ValidationError,
 } from "./errors";
+export { HookRegistry } from "./models/hooks";
 export type {
   AfterCreateHook,
   AfterDeleteHook,

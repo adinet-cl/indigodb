@@ -78,11 +78,15 @@ export function compileWhere(
         return `${column} <= ${placeholder(operand)}`;
       case "$in": {
         const list = expectArray(op, operand);
-        return list.length === 0 ? "FALSE" : `${column} = ANY(${placeholder(list)})`;
+        return list.length === 0
+          ? "FALSE"
+          : `${column} = ANY(${placeholder(list)})`;
       }
       case "$nin": {
         const list = expectArray(op, operand);
-        return list.length === 0 ? "TRUE" : `${column} <> ALL(${placeholder(list)})`;
+        return list.length === 0
+          ? "TRUE"
+          : `${column} <> ALL(${placeholder(list)})`;
       }
       case "$like":
         if (typeof operand !== "string") {

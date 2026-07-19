@@ -38,7 +38,10 @@ function matchesOperators(value: unknown, ops: FieldOperators): boolean {
   if (ops.$lte !== undefined && !isAfterOrEqual(ops.$lte, value)) return false;
   if (ops.$in !== undefined && !ops.$in.includes(value)) return false;
   if (ops.$nin !== undefined && ops.$nin.includes(value)) return false;
-  if (ops.$like !== undefined && !likeToRegex(ops.$like).test(String(value ?? ""))) {
+  if (
+    ops.$like !== undefined &&
+    !likeToRegex(ops.$like).test(String(value ?? ""))
+  ) {
     return false;
   }
   if (ops.$null !== undefined) {

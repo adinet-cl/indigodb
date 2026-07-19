@@ -17,7 +17,9 @@ jest.mock("pg", () => {
   class MockPool extends EventEmitter {
     query = jest.fn().mockResolvedValue({ rows: [] });
     end = jest.fn().mockResolvedValue(undefined);
-    connect = jest.fn().mockImplementation(() => Promise.resolve(new MockPoolClient()));
+    connect = jest
+      .fn()
+      .mockImplementation(() => Promise.resolve(new MockPoolClient()));
   }
 
   return {
@@ -119,7 +121,11 @@ describe("PostgresAdapter", () => {
 
     const pool = lastInstance(Pool);
     const statements = pool.query.mock.calls.map((call) => call[0] as string);
-    expect(statements.some((sql) => sql.includes('CREATE TABLE IF NOT EXISTS "users"'))).toBe(true);
+    expect(
+      statements.some((sql) =>
+        sql.includes('CREATE TABLE IF NOT EXISTS "users"')
+      )
+    ).toBe(true);
     expect(statements.some((sql) => sql.includes("CREATE TRIGGER"))).toBe(true);
   });
 
@@ -242,7 +248,11 @@ describe("PostgresAdapter", () => {
       const client = await connectMock.mock.results[0]!.value;
       expect(seenSameHooks).toBe(true);
       // findAll() ran on the transaction client, not the pool directly.
-      expect(client.query.mock.calls.some((c: unknown[]) => (c[0] as string).includes("SELECT"))).toBe(true);
+      expect(
+        client.query.mock.calls.some((c: unknown[]) =>
+          (c[0] as string).includes("SELECT")
+        )
+      ).toBe(true);
     });
 
     test("throws when connect() was not called first", async () => {

@@ -23,6 +23,19 @@ describe("likeToRegex", () => {
   test("is fully anchored", () => {
     expect(likeToRegex("da").test("Ada")).toBe(false);
   });
+
+  test("honors SQL escape sequences \\% \\_ \\\\ like PostgreSQL LIKE does", () => {
+    // \_ is a literal underscore, not a wildcard.
+    expect(likeToRegex("qe\\_%").test("qe_alpha")).toBe(true);
+    expect(likeToRegex("qe\\_%").test("qexalpha")).toBe(false);
+    // \% is a literal percent sign.
+    expect(likeToRegex("100\\%").test("100%")).toBe(true);
+    expect(likeToRegex("100\\%").test("100x")).toBe(false);
+    // \\ is a literal backslash.
+    expect(likeToRegex("a\\\\b").test("a\\b")).toBe(true);
+    // A trailing lone backslash is a literal backslash.
+    expect(likeToRegex("a\\").test("a\\")).toBe(true);
+  });
 });
 
 describe("compileFilter (MongoDB)", () => {

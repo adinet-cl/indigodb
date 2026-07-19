@@ -1,4 +1,10 @@
-import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -88,7 +94,10 @@ describe("indigodb-migrate CLI", () => {
   });
 
   test("create scaffolds a migration file without connecting to a database", async () => {
-    const code = await runCli(["create", "Add users", "--config", configPath], log);
+    const code = await runCli(
+      ["create", "Add users", "--config", configPath],
+      log
+    );
     expect(code).toBe(0);
     expect(IndigoDB).not.toHaveBeenCalled();
 

@@ -88,7 +88,10 @@ export class WebSocketGateway implements RealtimeGateway {
       try {
         authorized = await this.authenticate(request);
       } catch (err) {
-        this.logger.warn("WebSocket authenticate() threw; refusing connection", err);
+        this.logger.warn(
+          "WebSocket authenticate() threw; refusing connection",
+          err
+        );
         authorized = false;
       }
       if (!authorized) {
@@ -152,7 +155,8 @@ export class WebSocketGateway implements RealtimeGateway {
     // No subscription sent yet: back-compat default is "receive everything".
     if (!subscription) return true;
     if (!isChangeEvent(data)) return true;
-    if (subscription.models && !subscription.models.has(data.model)) return false;
+    if (subscription.models && !subscription.models.has(data.model))
+      return false;
     if (
       subscription.where &&
       !matchesWhere(data.data as Record<string, unknown>, subscription.where)

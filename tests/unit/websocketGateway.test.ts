@@ -45,9 +45,11 @@ function makeClient(readyState = 1): FakeClient {
 }
 
 function serverOf(gateway: WebSocketGateway) {
-  return (gateway as never as {
-    wss: { clients: Set<FakeClient>; closed: boolean } & EventEmitter;
-  }).wss;
+  return (
+    gateway as never as {
+      wss: { clients: Set<FakeClient>; closed: boolean } & EventEmitter;
+    }
+  ).wss;
 }
 
 class ConnectableClient extends EventEmitter {
@@ -202,7 +204,10 @@ describe("WebSocketGateway", () => {
       await gateway.start();
       const client = await connectedClient(gateway);
 
-      client.emit("message", Buffer.from(JSON.stringify({ type: "subscribe", models: ["users"] })));
+      client.emit(
+        "message",
+        Buffer.from(JSON.stringify({ type: "subscribe", models: ["users"] }))
+      );
 
       gateway.broadcast("databaseUpdate", {
         model: "orders",
@@ -255,8 +260,14 @@ describe("WebSocketGateway", () => {
       await gateway.start();
       const client = await connectedClient(gateway);
 
-      client.emit("message", Buffer.from(JSON.stringify({ type: "subscribe", models: ["users"] })));
-      client.emit("message", Buffer.from(JSON.stringify({ type: "subscribe", models: ["orders"] })));
+      client.emit(
+        "message",
+        Buffer.from(JSON.stringify({ type: "subscribe", models: ["users"] }))
+      );
+      client.emit(
+        "message",
+        Buffer.from(JSON.stringify({ type: "subscribe", models: ["orders"] }))
+      );
 
       gateway.broadcast("databaseUpdate", {
         model: "users",
@@ -280,7 +291,9 @@ describe("WebSocketGateway", () => {
       await gateway.start();
       const client = await connectedClient(gateway);
 
-      expect(() => client.emit("message", Buffer.from("not json"))).not.toThrow();
+      expect(() =>
+        client.emit("message", Buffer.from("not json"))
+      ).not.toThrow();
       expect(() =>
         client.emit("message", Buffer.from(JSON.stringify({ type: "ping" })))
       ).not.toThrow();
@@ -300,7 +313,10 @@ describe("WebSocketGateway", () => {
       await gateway.start();
       const client = await connectedClient(gateway);
 
-      client.emit("message", Buffer.from(JSON.stringify({ type: "subscribe", models: ["users"] })));
+      client.emit(
+        "message",
+        Buffer.from(JSON.stringify({ type: "subscribe", models: ["users"] }))
+      );
 
       gateway.broadcast("customEvent", { not: "a change event" });
       expect(client.send).toHaveBeenCalledTimes(1);

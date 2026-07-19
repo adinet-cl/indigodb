@@ -117,10 +117,7 @@ export function walkWhere(
 }
 
 /** Validates limit/offset values before they reach a query. */
-export function assertNonNegativeInteger(
-  value: number,
-  label: string
-): number {
+export function assertNonNegativeInteger(value: number, label: string): number {
   if (!Number.isInteger(value) || value < 0) {
     throw new QueryError(`"${label}" must be a non-negative integer`);
   }

@@ -9,12 +9,13 @@ import {
 import { DatabaseAdapter, TransactionContext } from "../adapter";
 import { BaseModel } from "../../models/baseModel";
 import { MongoModel } from "./mongoModel";
-import { ChangeEvent, ModelOptions, ModelSchema, MongoConfig } from "../../types";
 import {
-  ConfigurationError,
-  ConnectionError,
-  QueryError,
-} from "../../errors";
+  ChangeEvent,
+  ModelOptions,
+  ModelSchema,
+  MongoConfig,
+} from "../../types";
+import { ConfigurationError, ConnectionError, QueryError } from "../../errors";
 import { Logger, noopLogger } from "../../logger";
 
 /**

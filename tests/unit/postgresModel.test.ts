@@ -30,7 +30,11 @@ describe("PostgresModel", () => {
   test("requires a primaryKey column in the schema", () => {
     expect(
       () =>
-        new PostgresModel("users", { name: { type: DataTypes.STRING } }, makePool())
+        new PostgresModel(
+          "users",
+          { name: { type: DataTypes.STRING } },
+          makePool()
+        )
     ).toThrow(ConfigurationError);
   });
 
@@ -100,7 +104,10 @@ describe("PostgresModel", () => {
     const pool = makePool([row]);
     const model = new PostgresModel<User>("users", userSchema, pool);
 
-    const result = await model.create({ name: "Ada", email: "ada@example.com" });
+    const result = await model.create({
+      name: "Ada",
+      email: "ada@example.com",
+    });
 
     expect(pool.query).toHaveBeenCalledWith(
       'INSERT INTO "users" ("name", "email") VALUES ($1, $2) RETURNING *;',
@@ -135,9 +142,9 @@ describe("PostgresModel", () => {
 
   test("findAll rejects unknown criteria keys", async () => {
     const model = new PostgresModel<User>("users", userSchema, makePool());
-    await expect(
-      model.findAll({ "1=1; --": "x" } as never)
-    ).rejects.toThrow(UnknownColumnError);
+    await expect(model.findAll({ "1=1; --": "x" } as never)).rejects.toThrow(
+      UnknownColumnError
+    );
   });
 
   test("findById/update/delete use the schema primary key", async () => {
@@ -207,9 +214,9 @@ describe("PostgresModel", () => {
 
   test("findAll rejects unknown columns in where, orderBy and select", async () => {
     const model = new PostgresModel<User>("users", userSchema, makePool());
-    await expect(
-      model.findAll({ "evil; --": 1 } as never)
-    ).rejects.toThrow(UnknownColumnError);
+    await expect(model.findAll({ "evil; --": 1 } as never)).rejects.toThrow(
+      UnknownColumnError
+    );
     await expect(
       model.findAll({}, { orderBy: { "evil; --": "asc" } as never })
     ).rejects.toThrow(UnknownColumnError);
@@ -262,7 +269,11 @@ describe("PostgresModel", () => {
       ["Ada", 1]
     );
 
-    const emptyModel = new PostgresModel<User>("users", userSchema, makePool([]));
+    const emptyModel = new PostgresModel<User>(
+      "users",
+      userSchema,
+      makePool([])
+    );
     await expect(emptyModel.exists()).resolves.toBe(false);
   });
 
@@ -295,7 +306,9 @@ describe("PostgresModel", () => {
   });
 
   test("updateMany compiles SET before WHERE and returns rowCount", async () => {
-    const pool = { query: jest.fn().mockResolvedValue({ rows: [], rowCount: 3 }) };
+    const pool = {
+      query: jest.fn().mockResolvedValue({ rows: [], rowCount: 3 }),
+    };
     const model = new PostgresModel<User>("users", userSchema, pool);
 
     const affected = await model.updateMany(
@@ -311,7 +324,9 @@ describe("PostgresModel", () => {
   });
 
   test("deleteMany with empty where deletes all and returns rowCount", async () => {
-    const pool = { query: jest.fn().mockResolvedValue({ rows: [], rowCount: 9 }) };
+    const pool = {
+      query: jest.fn().mockResolvedValue({ rows: [], rowCount: 9 }),
+    };
     const model = new PostgresModel<User>("users", userSchema, pool);
 
     const removed = await model.deleteMany({});
@@ -323,7 +338,9 @@ describe("PostgresModel", () => {
   test("limit/offset must be non-negative integers", async () => {
     const model = new PostgresModel<User>("users", userSchema, makePool());
     await expect(model.findAll({}, { limit: -1 })).rejects.toThrow(QueryError);
-    await expect(model.findAll({}, { offset: 1.5 })).rejects.toThrow(QueryError);
+    await expect(model.findAll({}, { offset: 1.5 })).rejects.toThrow(
+      QueryError
+    );
   });
 });
 
@@ -338,7 +355,12 @@ describe("PostgresModel schema completeness", () => {
 
   const accountSchema: ModelSchema = {
     id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
-    email: { type: DataTypes.STRING, required: true, unique: true, index: true },
+    email: {
+      type: DataTypes.STRING,
+      required: true,
+      unique: true,
+      index: true,
+    },
     plan: { type: DataTypes.STRING, default: "free" },
   };
 
@@ -348,9 +370,7 @@ describe("PostgresModel schema completeness", () => {
     await model.init();
 
     const createTableSql = pool.query.mock.calls[0][0] as string;
-    expect(createTableSql).toContain(
-      '"email" VARCHAR(255) UNIQUE NOT NULL'
-    );
+    expect(createTableSql).toContain('"email" VARCHAR(255) UNIQUE NOT NULL');
   });
 
   test("init creates a non-unique index only for index:true, non-unique columns", async () => {
@@ -377,7 +397,9 @@ describe("PostgresModel schema completeness", () => {
     const indexSql = pool.query.mock.calls
       .map((call) => call[0] as string)
       .find((sql) => sql.includes("CREATE INDEX"));
-    expect(indexSql).toContain('CREATE INDEX IF NOT EXISTS "statuses_status_idx"');
+    expect(indexSql).toContain(
+      'CREATE INDEX IF NOT EXISTS "statuses_status_idx"'
+    );
     expect(indexSql).toContain('ON "statuses" ("status")');
   });
 
@@ -396,7 +418,9 @@ describe("PostgresModel schema completeness", () => {
   test("create throws ValidationError when a required column is missing", async () => {
     const pool = makePool();
     const model = new PostgresModel<Account>("accounts", accountSchema, pool);
-    await expect(model.create({ plan: "pro" })).rejects.toThrow(ValidationError);
+    await expect(model.create({ plan: "pro" })).rejects.toThrow(
+      ValidationError
+    );
   });
 
   test("timestamps: create stamps createdAt/updatedAt and update refreshes updatedAt", async () => {
@@ -502,7 +526,9 @@ describe("PostgresModel relations", () => {
     const model = new PostgresModel<RelPost>("posts", relPostSchema, pool);
     await model.init();
     const createTableSql = pool.query.mock.calls[0][0] as string;
-    expect(createTableSql).toContain('"userId" INTEGER REFERENCES "users" ("id")');
+    expect(createTableSql).toContain(
+      '"userId" INTEGER REFERENCES "users" ("id")'
+    );
   });
 
   test("createTable rejects unsafe references.model values", async () => {

@@ -83,7 +83,6 @@ export class MigrationRunner {
       .filter((file) => MIGRATION_FILE_PATTERN.test(file))
       .sort()
       .map((file) => {
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
         const mod = require(join(this.directory, file)) as Partial<Migration>;
         if (typeof mod.up !== "function" || typeof mod.down !== "function") {
           throw new ConfigurationError(

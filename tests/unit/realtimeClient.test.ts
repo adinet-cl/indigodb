@@ -52,7 +52,11 @@ describe("RealtimeClient", () => {
     lastSocket().emit("open");
 
     expect(lastSocket().send).toHaveBeenCalledWith(
-      JSON.stringify({ type: "subscribe", models: ["users"], where: { active: true } })
+      JSON.stringify({
+        type: "subscribe",
+        models: ["users"],
+        where: { active: true },
+      })
     );
   });
 
@@ -69,7 +73,11 @@ describe("RealtimeClient", () => {
     const received: unknown[] = [];
     client.on((event) => received.push(event));
 
-    const changeEvent = { model: "users", operation: "INSERT", data: { id: 1 } };
+    const changeEvent = {
+      model: "users",
+      operation: "INSERT",
+      data: { id: 1 },
+    };
     lastSocket().emit("message", {
       data: JSON.stringify({ event: "databaseUpdate", data: changeEvent }),
     });
@@ -83,7 +91,9 @@ describe("RealtimeClient", () => {
     const received: unknown[] = [];
     client.on((event) => received.push(event));
 
-    expect(() => lastSocket().emit("message", { data: "not json" })).not.toThrow();
+    expect(() =>
+      lastSocket().emit("message", { data: "not json" })
+    ).not.toThrow();
     lastSocket().emit("message", { data: JSON.stringify({ event: "other" }) });
 
     expect(received).toEqual([]);

@@ -9,7 +9,10 @@ import type { ChangeEvent } from "../types";
 interface MinimalWebSocket {
   send(data: string): void;
   close(code?: number, reason?: string): void;
-  addEventListener(type: "open" | "close" | "error", listener: () => void): void;
+  addEventListener(
+    type: "open" | "close" | "error",
+    listener: () => void
+  ): void;
   addEventListener(
     type: "message",
     listener: (event: { data: unknown }) => void
