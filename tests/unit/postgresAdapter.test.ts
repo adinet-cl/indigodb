@@ -138,4 +138,20 @@ describe("PostgresAdapter", () => {
     expect(listenClient.end).toHaveBeenCalled();
     expect(pool.end).toHaveBeenCalled();
   });
+
+  test("connect releases the pool if the listener fails to connect", async () => {
+    (Client as unknown as jest.Mock).mockImplementationOnce(() => {
+      const client = new EventEmitter() as MockInstance;
+      client.connect = jest.fn().mockRejectedValue(new Error("listen failed"));
+      client.query = jest.fn().mockResolvedValue({ rows: [] });
+      client.end = jest.fn().mockResolvedValue(undefined);
+      return client;
+    });
+
+    const adapter = new PostgresAdapter(config);
+    await expect(adapter.connect()).rejects.toThrow("listen failed");
+
+    // The pool opened before the failure must be drained.
+    expect(lastInstance(Pool).end).toHaveBeenCalled();
+  });
 });

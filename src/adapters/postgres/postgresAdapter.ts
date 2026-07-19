@@ -26,13 +26,20 @@ export class PostgresAdapter extends DatabaseAdapter {
   }
 
   public async connect(): Promise<void> {
+    this.closing = false;
     this.pool = new Pool(this.connectionOptions());
     this.pool.on("error", (err) => {
       this.logger.error("PostgreSQL pool error", err);
     });
-    // Fail fast on bad credentials/host instead of on the first query.
-    await this.pool.query("SELECT 1");
-    await this.startListener();
+    try {
+      // Fail fast on bad credentials/host instead of on the first query.
+      await this.pool.query("SELECT 1");
+      await this.startListener();
+    } catch (err) {
+      // Release the pool / listen client if we fail partway through connecting.
+      await this.disconnect().catch(() => undefined);
+      throw err;
+    }
   }
 
   private connectionOptions() {

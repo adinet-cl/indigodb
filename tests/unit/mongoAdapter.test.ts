@@ -92,6 +92,28 @@ describe("MongoAdapter", () => {
     expect(events).toHaveLength(1);
   });
 
+  test("warns when redefining a model with a different schema", async () => {
+    const logger = {
+      debug: jest.fn(),
+      info: jest.fn(),
+      warn: jest.fn(),
+      error: jest.fn(),
+    };
+    const adapter = new MongoAdapter(config, logger);
+    await adapter.connect();
+
+    await adapter.defineModel("products", { name: { type: DataTypes.STRING } });
+    await adapter.defineModel("products", {
+      name: { type: DataTypes.STRING },
+      price: { type: DataTypes.FLOAT },
+    });
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining("already defined")
+    );
+    expect(mockCollection.watch).toHaveBeenCalledTimes(1);
+  });
+
   test("insert events are broadcast as INSERT", async () => {
     const { events } = await connectedAdapterWithModel();
     const doc = { _id: new ObjectId(), name: "Widget" };

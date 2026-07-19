@@ -55,6 +55,12 @@ export class MongoAdapter extends DatabaseAdapter {
     const model = new MongoModel<T>(name, schema, collection);
     const existing = this.models.get(model.name);
     if (existing) {
+      if (JSON.stringify(existing.schema) !== JSON.stringify(schema)) {
+        this.logger.warn(
+          `Model "${model.name}" is already defined; ignoring the new schema ` +
+            `(first definition wins). Call close() and reconnect to redefine it.`
+        );
+      }
       return existing as MongoModel<T>;
     }
     this.models.set(model.name, model as MongoModel<unknown>);
