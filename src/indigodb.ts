@@ -52,7 +52,8 @@ export class IndigoDB extends EventEmitter {
     if (config.realtime?.enabled) {
       this.gateway = new WebSocketGateway(
         config.realtime.port ?? DEFAULT_WEBSOCKET_PORT,
-        this.logger
+        this.logger,
+        config.realtime.authenticate
       );
     }
 

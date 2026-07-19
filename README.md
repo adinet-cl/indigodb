@@ -82,6 +82,8 @@ MongoDB documents use `_id` as the primary key automatically; string ids that lo
 
 ## Real-time frontend integration
 
+### Plain WebSocket
+
 Connect to the WebSocket server and listen for updates:
 
 ```typescript
@@ -95,7 +97,57 @@ socket.onmessage = (event) => {
 };
 ```
 
-The payload shape is identical whether the change originated in PostgreSQL or MongoDB, so a single frontend handler covers both backends.
+The payload shape is identical whether the change originated in PostgreSQL or MongoDB, so a single frontend handler covers both backends. By default a client receives **every** change event across every model.
+
+### Filtered subscriptions
+
+Send a `subscribe` message right after connecting to narrow what you receive — by model, by a `Where` filter (same operator syntax as [Querying](#querying)), or both. A later `subscribe` message replaces the previous filter:
+
+```typescript
+socket.onopen = () => {
+  socket.send(JSON.stringify({
+    type: "subscribe",
+    models: ["orders"],
+    where: { status: "urgent" },
+  }));
+};
+```
+
+### `@adinet/indigodb/client`
+
+A small, dependency-free client (works in any environment with a global `WebSocket` — browsers, or Node 22+) handles connecting, sending the subscribe filter, re-subscribing after a reconnect, and exponential backoff:
+
+```typescript
+import { RealtimeClient } from "@adinet/indigodb/client";
+
+const client = new RealtimeClient({
+  url: "ws://localhost:8080",
+  models: ["orders"],
+  where: { status: "urgent" },
+});
+client.connect();
+
+const unsubscribe = client.on((event) => {
+  console.log(event.model, event.operation, event.data);
+});
+```
+
+### WebSocket authentication
+
+Pass `realtime.authenticate` to validate connections (token in a header, query string, cookie — whatever your app uses) before they're accepted; refusing a connection closes the socket with code `4001`:
+
+```typescript
+const db = new IndigoDB({
+  database: { /* ... */ },
+  realtime: {
+    enabled: true,
+    authenticate: (request) => {
+      const token = new URL(request.url ?? "", "http://x").searchParams.get("token");
+      return token === process.env.REALTIME_TOKEN;
+    },
+  },
+});
+```
 
 ## API reference
 
@@ -104,7 +156,7 @@ The payload shape is identical whether the change originated in PostgreSQL or Mo
 | Config field | Description |
 | --- | --- |
 | `database` | Discriminated by `type`. PostgreSQL: `{ type: "postgresql", host, port, user, password, database }` (or `connectionString`). MongoDB: `{ type: "mongodb", connectionString, database? }`. |
-| `realtime` | Optional. `{ enabled: boolean, port?: number }` — defaults to port `8080`. When omitted or `enabled: false`, **no WebSocket server is started**. |
+| `realtime` | Optional. `{ enabled: boolean, port?: number, authenticate? }` — defaults to port `8080`. When omitted or `enabled: false`, **no WebSocket server is started**. `authenticate(request)` (optional) runs per connection; return `false` to refuse it. |
 | `logger` | Optional `Logger`. Defaults to a no-op; pass `consoleLogger` (exported) or your own. |
 
 ### Methods

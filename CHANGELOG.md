@@ -4,6 +4,35 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.0] - 2026-07-19
+
+Advanced real-time. Fully backward compatible with v2.4 — clients that never
+send a "subscribe" message keep receiving every change event, as before.
+
+### Added
+
+- **Filtered subscriptions**: a client can send
+  `{ "type": "subscribe", "models": [...], "where": {...} }` over the
+  WebSocket connection to receive only matching `ChangeEvent`s. A later
+  "subscribe" message replaces the previous filter. `where` uses the same
+  operator syntax as the query engine (`$gt`, `$in`, `$like`, `$or`, ...),
+  evaluated in memory against the event payload (new `matchesWhere()`
+  helper) — no database round-trip.
+- **Pluggable WebSocket auth**: `realtime.authenticate(request)` runs for
+  every incoming connection with the raw HTTP upgrade request; returning
+  (or resolving) `false` — or throwing — closes the socket with code 4001
+  before it's added to the client pool.
+- **`@adinet/indigodb/client`**: a small, dependency-free `RealtimeClient`
+  for browsers (or any runtime with a global `WebSocket`) — connects, sends
+  the subscribe filter, re-subscribes after reconnecting, and backs off
+  exponentially between reconnect attempts. Exported via a new `exports`
+  map subpath so it never pulls in `pg`/`mongodb`/`ws`/Node built-ins.
+
+### Changed
+
+- `RealtimeConfig` gains `authenticate`; `WebSocketGateway`'s constructor
+  gains a third `authenticate` parameter (both optional, non-breaking).
+
 ## [2.4.0] - 2026-07-19
 
 Migrations. Fully backward compatible with v2.3.

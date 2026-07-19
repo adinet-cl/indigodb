@@ -5,6 +5,7 @@ export { BaseModel as Model } from "./models/baseModel";
 export { DatabaseAdapter } from "./adapters/adapter";
 export type { TransactionContext } from "./adapters/adapter";
 export type { RealtimeGateway } from "./realtime/gateway";
+export type { AuthenticateConnection } from "./realtime/websocketGateway";
 export {
   IndigoDBError,
   ConfigurationError,
