@@ -173,7 +173,7 @@ const db = new IndigoDB({
 | --- | --- |
 | `create(data)` | Insert a record; returns the created row. |
 | `createMany(data[])` | Bulk insert (single multi-row INSERT / `insertMany`); returns the created rows. |
-| `findAll(where?, options?)` | Query with operators, `orderBy`, `limit`, `offset`, `select`. |
+| `findAll(where?, options?)` | Query with operators, `orderBy`, `limit`, `offset`, `select`, `include` (see [Relations](#relations)). |
 | `findOne(where?, options?)` | First match or `null`. |
 | `findById(id)` | Return a record by its primary key, or `null`. |
 | `count(where?)` | Number of matching records. |
@@ -207,6 +207,36 @@ const Accounts = await db.defineModel<Account>(
 - **`default`** — a static value or a zero-argument factory invoked per row when the column is omitted.
 - **`index`** — creates a non-unique index; `unique` (already available) creates a unique index on both backends.
 - **`timestamps`** (model option) — `createdAt` is stamped on `create()`; `updatedAt` is stamped on `create()` and refreshed on every `update()` / `updateMany()`.
+- **`references`** — `{ model, column? }`, a foreign key hint (see [Relations](#relations)).
+
+## Relations
+
+```typescript
+const Users = await db.defineModel<User>("users", {
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  name: { type: DataTypes.STRING },
+});
+
+// Define the target of a reference BEFORE the model that references it —
+// PostgreSQL needs the referenced table to already exist.
+const Posts = await db.defineModel<Post>("posts", {
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  title: { type: DataTypes.STRING },
+  userId: { type: DataTypes.INTEGER, references: { model: "users" } },
+});
+
+Users.hasMany(Posts, { foreignKey: "userId", as: "posts" });
+Posts.belongsTo(Users, { foreignKey: "userId", as: "author" });
+
+const usersWithPosts = await Users.findAll({}, { include: ["posts"] });
+console.log(usersWithPosts[0].posts); // Post[]
+
+const postsWithAuthor = await Posts.findAll({}, { include: ["author"] });
+console.log(postsWithAuthor[0].author); // User | null
+```
+
+- **`references`** (PostgreSQL) adds a `REFERENCES` constraint at table-creation time. On MongoDB it's documentation only — there's no native FK enforcement.
+- **`include`** runs **one batched query per association** (via `$in` against the target model, reusing its own `findAll()`) — never one query per row, and identical on both backends since no JOIN/`$lookup` is involved. Including an association that wasn't registered with `hasMany`/`belongsTo` throws `ConfigurationError`.
 
 ## Lifecycle hooks
 

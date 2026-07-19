@@ -51,6 +51,8 @@ export interface QueryOptions<T> {
   limit?: number;
   offset?: number;
   select?: Extract<keyof T, string>[];
+  /** Association names (registered via `hasMany`/`belongsTo`) to eager-load. */
+  include?: string[];
 }
 
 /**

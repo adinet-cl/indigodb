@@ -4,6 +4,29 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.0] - 2026-07-19
+
+Relations — the last planned item on the roadmap to a feature-complete
+release. Purely additive (no existing signature changes), but versioned as
+3.0.0 to mark this as the feature-complete milestone.
+
+### Added
+
+- **`model.hasMany(target, { foreignKey, as? })`** / **`model.belongsTo(target, { foreignKey, as? })`**:
+  register a one-to-many / many-to-one association between two models.
+- **Eager loading**: `findAll(where, { include: ["posts"] })` /
+  `findOne(where, { include: [...] })` attach the related record(s) under
+  the association's `as` name. Implemented as **one batched `$in` query per
+  association** (not a JOIN/`$lookup`) by calling the target model's own
+  `findAll()` — works identically on both backends with zero backend-specific
+  code, and sidesteps the row-multiplication problem plain SQL JOINs have
+  with `hasMany`. `include` on an unregistered association throws
+  `ConfigurationError`.
+- **`ColumnDefinition.references`**: `{ model, column? }`. PostgreSQL adds a
+  `REFERENCES` constraint (the referenced table must already exist — define
+  target models first); MongoDB treats it as documentation only, since it
+  has no native FK constraints.
+
 ## [2.5.0] - 2026-07-19
 
 Advanced real-time. Fully backward compatible with v2.4 — clients that never

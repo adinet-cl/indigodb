@@ -1,6 +1,7 @@
 import type { Pool } from "pg";
 import { BaseModel } from "../../models/baseModel";
 import { ModelOptions, ModelSchema } from "../../types";
+import { assertValidIdentifier } from "../../identifiers";
 import { POSTGRES_TYPE_MAP } from "../../dataTypes";
 import { QueryError, UnsupportedTypeError } from "../../errors";
 import { NOTIFICATION_CHANNEL } from "./constants";
@@ -78,6 +79,13 @@ export class PostgresModel<T> extends BaseModel<T> {
       if (columnProps.primaryKey) columnDef += " PRIMARY KEY";
       if (columnProps.unique) columnDef += " UNIQUE";
       if (columnProps.required && !columnProps.primaryKey) columnDef += " NOT NULL";
+      if (columnProps.references) {
+        const refTable = quote(assertValidIdentifier(columnProps.references.model));
+        const refColumn = quote(
+          assertValidIdentifier(columnProps.references.column ?? "id")
+        );
+        columnDef += ` REFERENCES ${refTable} (${refColumn})`;
+      }
       columns.push(columnDef);
     }
 
@@ -172,7 +180,7 @@ export class PostgresModel<T> extends BaseModel<T> {
   ): Promise<T[]> {
     const { sql, values } = this.buildSelect("*", where, options);
     const result = await this.pool.query(sql, values);
-    return result.rows as T[];
+    return this.attachIncludes(result.rows as T[], options.include);
   }
 
   public async findOne(

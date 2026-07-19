@@ -10,6 +10,19 @@ import { HookRegistry } from "./hooks";
 
 export const TIMESTAMP_COLUMNS = ["createdAt", "updatedAt"] as const;
 
+interface AssociationDef {
+  type: "hasMany" | "belongsTo";
+  target: BaseModel<unknown>;
+  foreignKey: string;
+  as: string;
+}
+
+export interface AssociationOptions {
+  foreignKey: string;
+  /** Property name the related record(s) are attached under. Defaults to the target model's name. */
+  as?: string;
+}
+
 /**
  * Template Method base for all database models: guarantees the same CRUD
  * contract across backends and centralizes schema/identifier validation and
@@ -21,6 +34,7 @@ export abstract class BaseModel<T> {
   public readonly primaryKey: string;
   public readonly timestamps: boolean;
   public readonly hooks: HookRegistry<T>;
+  private readonly associations = new Map<string, AssociationDef>();
 
   protected constructor(
     name: string,
@@ -132,6 +146,105 @@ export abstract class BaseModel<T> {
     }
     for (const column of options.select ?? []) {
       this.assertKnownColumn(column);
+    }
+    for (const name of options.include ?? []) {
+      if (!this.associations.has(name)) {
+        throw new ConfigurationError(
+          `Unknown association "${name}" on model "${this.name}". ` +
+            `Register it with hasMany()/belongsTo() before querying with it.`
+        );
+      }
+    }
+  }
+
+  /**
+   * One-to-many association: `this` owns many `target` rows, matched by
+   * `target[foreignKey] === this[primaryKey]`. Attaches an array under `as`
+   * (default: the target model's name) when the association is `include`d.
+   */
+  public hasMany<R>(target: BaseModel<R>, options: AssociationOptions): void {
+    const as = options.as ?? target.name;
+    this.associations.set(as, {
+      type: "hasMany",
+      target: target as unknown as BaseModel<unknown>,
+      foreignKey: options.foreignKey,
+      as,
+    });
+  }
+
+  /**
+   * Many-to-one association: `this[foreignKey]` points at one `target` row,
+   * matched by `target[target.primaryKey] === this[foreignKey]`. Attaches a
+   * single object (or `null`) under `as` when the association is `include`d.
+   */
+  public belongsTo<R>(target: BaseModel<R>, options: AssociationOptions): void {
+    const as = options.as ?? target.name;
+    this.associations.set(as, {
+      type: "belongsTo",
+      target: target as unknown as BaseModel<unknown>,
+      foreignKey: options.foreignKey,
+      as,
+    });
+  }
+
+  /**
+   * Resolves `options.include` for a page of rows with one batched query per
+   * association (never one query per row): collects the relevant keys,
+   * fetches every related record with a single `$in` query on the target
+   * model, then joins in memory. Works identically on both backends since it
+   * only calls the target's own `findAll()` — no backend-specific JOIN/
+   * `$lookup` code needed.
+   */
+  protected async attachIncludes(rows: T[], include?: string[]): Promise<T[]> {
+    if (!include || include.length === 0 || rows.length === 0) return rows;
+    for (const name of include) {
+      const assoc = this.associations.get(name);
+      if (!assoc) continue; // already validated by assertKnownOptionColumns
+      await this.attachOne(rows, assoc);
+    }
+    return rows;
+  }
+
+  private async attachOne(rows: T[], assoc: AssociationDef): Promise<void> {
+    const records = rows as unknown as Record<string, unknown>[];
+
+    if (assoc.type === "hasMany") {
+      const ids = [...new Set(records.map((r) => r[this.primaryKey]))];
+      const related = (await assoc.target.findAll({
+        [assoc.foreignKey]: { $in: ids },
+      } as never)) as unknown as Record<string, unknown>[];
+
+      const byForeignKey = new Map<unknown, Record<string, unknown>[]>();
+      for (const record of related) {
+        const key = record[assoc.foreignKey];
+        const bucket = byForeignKey.get(key);
+        if (bucket) bucket.push(record);
+        else byForeignKey.set(key, [record]);
+      }
+      for (const row of records) {
+        row[assoc.as] = byForeignKey.get(row[this.primaryKey]) ?? [];
+      }
+      return;
+    }
+
+    // belongsTo
+    const ids = [
+      ...new Set(
+        records
+          .map((r) => r[assoc.foreignKey])
+          .filter((v) => v !== null && v !== undefined)
+      ),
+    ];
+    const related = (await assoc.target.findAll({
+      [assoc.target.primaryKey]: { $in: ids },
+    } as never)) as unknown as Record<string, unknown>[];
+
+    const byPrimaryKey = new Map<unknown, Record<string, unknown>>();
+    for (const record of related) {
+      byPrimaryKey.set(record[assoc.target.primaryKey], record);
+    }
+    for (const row of records) {
+      row[assoc.as] = byPrimaryKey.get(row[assoc.foreignKey]) ?? null;
     }
   }
 

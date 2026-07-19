@@ -1,7 +1,11 @@
 import { ObjectId } from "mongodb";
 import { MongoModel } from "../../src/adapters/mongo/mongoModel";
 import { DataTypes } from "../../src/dataTypes";
-import { UnknownColumnError, ValidationError } from "../../src/errors";
+import {
+  ConfigurationError,
+  UnknownColumnError,
+  ValidationError,
+} from "../../src/errors";
 import { ModelSchema } from "../../src/types";
 
 interface Product {
@@ -415,5 +419,105 @@ describe("MongoModel schema completeness", () => {
       {}
     );
     expect(beforeCreateCalls).toHaveLength(0);
+  });
+});
+
+describe("MongoModel relations", () => {
+  interface RelUser {
+    _id?: unknown;
+    name: string;
+  }
+  interface RelPost {
+    _id?: unknown;
+    title: string;
+    userId: unknown;
+  }
+
+  const relUserSchema: ModelSchema = {
+    name: { type: DataTypes.STRING },
+  };
+  const relPostSchema: ModelSchema = {
+    title: { type: DataTypes.STRING },
+    userId: { type: DataTypes.STRING },
+  };
+
+  function cursorOf(docs: unknown[]) {
+    return { toArray: jest.fn().mockResolvedValue(docs) };
+  }
+
+  test("hasMany + include batches a single query per association and attaches results", async () => {
+    const userId1 = new ObjectId();
+    const userId2 = new ObjectId();
+    const usersCollection = makeCollection();
+    usersCollection.find.mockReturnValue(
+      cursorOf([
+        { _id: userId1, name: "Ada" },
+        { _id: userId2, name: "Bob" },
+      ])
+    );
+    const users = new MongoModel<RelUser>("users", relUserSchema, usersCollection as never);
+
+    const postsCollection = makeCollection();
+    postsCollection.find.mockReturnValue(
+      cursorOf([
+        { _id: new ObjectId(), title: "Post A", userId: userId1 },
+        { _id: new ObjectId(), title: "Post B", userId: userId1 },
+        { _id: new ObjectId(), title: "Post C", userId: userId2 },
+      ])
+    );
+    const posts = new MongoModel<RelPost>("posts", relPostSchema, postsCollection as never);
+
+    users.hasMany(posts, { foreignKey: "userId", as: "posts" });
+
+    const result = await users.findAll({}, { include: ["posts"] });
+
+    expect(postsCollection.find).toHaveBeenCalledTimes(1);
+    expect((result[0] as unknown as { posts: unknown[] }).posts).toHaveLength(2);
+    expect((result[1] as unknown as { posts: unknown[] }).posts).toHaveLength(1);
+  });
+
+  test("belongsTo + include attaches a single related record or null", async () => {
+    const userId = new ObjectId();
+    const usersCollection = makeCollection();
+    usersCollection.find.mockReturnValue(cursorOf([{ _id: userId, name: "Ada" }]));
+    const users = new MongoModel<RelUser>("users", relUserSchema, usersCollection as never);
+
+    const postsCollection = makeCollection();
+    postsCollection.find.mockReturnValue(
+      cursorOf([
+        { _id: new ObjectId(), title: "Post A", userId },
+        { _id: new ObjectId(), title: "Orphan", userId: new ObjectId() },
+      ])
+    );
+    const posts = new MongoModel<RelPost>("posts", relPostSchema, postsCollection as never);
+
+    posts.belongsTo(users, { foreignKey: "userId", as: "author" });
+
+    const result = await posts.findAll({}, { include: ["author"] });
+
+    expect((result[0] as unknown as { author: { name: string } }).author.name).toBe(
+      "Ada"
+    );
+    expect((result[1] as unknown as { author: unknown }).author).toBeNull();
+  });
+
+  test("findAll rejects an unregistered include name", async () => {
+    const collection = makeCollection();
+    const model = new MongoModel<RelPost>("posts", relPostSchema, collection as never);
+    await expect(model.findAll({}, { include: ["nope"] })).rejects.toThrow(
+      ConfigurationError
+    );
+  });
+
+  test("include is a no-op for an empty result set (no extra query issued)", async () => {
+    const usersCollection = makeCollection();
+    usersCollection.find.mockReturnValue(cursorOf([]));
+    const users = new MongoModel<RelUser>("users", relUserSchema, usersCollection as never);
+    const postsCollection = makeCollection();
+    const posts = new MongoModel<RelPost>("posts", relPostSchema, postsCollection as never);
+    users.hasMany(posts, { foreignKey: "userId", as: "posts" });
+
+    await users.findAll({}, { include: ["posts"] });
+    expect(postsCollection.find).not.toHaveBeenCalled();
   });
 });

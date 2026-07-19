@@ -13,6 +13,12 @@ export interface ColumnDefinition {
   default?: unknown | (() => unknown);
   /** Creates a non-unique index on this column. */
   index?: boolean;
+  /**
+   * Foreign key target. PostgreSQL: adds a `REFERENCES` constraint — the
+   * referenced table must already exist, so define the target model first.
+   * MongoDB: documentation only, not enforced (no native FK constraints).
+   */
+  references?: { model: string; column?: string };
 }
 
 export interface ModelSchema {
