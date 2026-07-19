@@ -29,6 +29,16 @@ export type {
   QueryOptions,
   Where,
 } from "./query/where";
+export { MigrationRunner } from "./migrations/migrationRunner";
+export type {
+  MigrationDatabase,
+  MigrationRunnerOptions,
+} from "./migrations/migrationRunner";
+export type {
+  Migration,
+  MigrationContext,
+  MigrationStatus,
+} from "./migrations/types";
 export type { Logger } from "./logger";
 export { consoleLogger, noopLogger } from "./logger";
 export type {

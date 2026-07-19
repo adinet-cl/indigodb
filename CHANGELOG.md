@@ -4,6 +4,32 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.0] - 2026-07-19
+
+Migrations. Fully backward compatible with v2.3.
+
+### Added
+
+- **`MigrationRunner`** (exported): applies/reverts migrations from a
+  directory of `.js`/`.cjs` files (loaded and ordered by filename), tracked
+  in a history table/collection defined via the existing `defineModel()` —
+  no backend-specific bookkeeping code, works identically on both backends.
+  - `up()` — applies every pending migration, in filename order.
+  - `down()` — reverts the most recently applied migration.
+  - `status()` — `{ applied, pending }` migration names.
+  - History records use an explicit monotonic `sequence` column (not just
+    `appliedAt`) so `down()` picks the right migration even when several are
+    applied within the same DATE-column tick.
+- **`indigodb-migrate` CLI** (new `bin` entry): `up`, `down`, `status`,
+  `create <name>` (scaffolds a migration file). Reads `indigodb.config.js`
+  (or `--config <path>`) from the working directory —
+  `module.exports = { database: {...}, migrationsDir: "./migrations" }`.
+- Migration files receive a `MigrationContext` with `raw()` — the same
+  escape hatch as `IndigoDB.raw()` — so `up`/`down` run real SQL on
+  PostgreSQL or command documents on MongoDB.
+- New exported types: `Migration`, `MigrationContext`, `MigrationStatus`,
+  `MigrationDatabase`, `MigrationRunnerOptions`.
+
 ## [2.3.0] - 2026-07-19
 
 Transactions. Fully backward compatible with v2.2.

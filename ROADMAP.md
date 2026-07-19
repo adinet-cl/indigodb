@@ -18,12 +18,11 @@ matter — ordered below by dependency and cost.
 | **Schema completeness**: `required`, `default` (value or factory), non-unique + unique indexes on both backends, `timestamps` model option | ✅ v2.2 |
 | **Lifecycle hooks**: `beforeCreate`/`afterCreate`/`beforeUpdate`/`afterUpdate`/`beforeDelete`/`afterDelete` via `model.hooks` | ✅ v2.2 |
 | **Transactions**: `db.transaction(async (tx) => ...)` with `tx.getModel()` (shares hooks with the original model), automatic commit/rollback on both backends | ✅ v2.3 |
+| **Migrations**: `MigrationRunner` + `indigodb-migrate` CLI (`up`/`down`/`status`/`create`), history tracked via `defineModel` on both backends | ✅ v2.4 |
 | Mocked unit suite (no DB required) + opt-in integration suite | ✅ v2.0 |
 
 ## What's missing (the gaps)
 
-- **Migrations**: `CREATE TABLE IF NOT EXISTS` never alters existing tables —
-  schema evolution is manual today.
 - **Advanced real-time**: per-model/filtered subscriptions, WebSocket
   authentication, a frontend client library.
 - **Relations**: `hasMany` / `belongsTo`, eager loading (`include` / populate).
@@ -44,12 +43,13 @@ matter — ordered below by dependency and cost.
 - MongoDB: `ClientSession` + `withTransaction` (requires replica set — same
   constraint change streams already impose).
 
-### v2.4.0 — Migraciones
-- `indigodb migrate` CLI: `create`, `up`, `down`, `status`.
-- Migration history table/collection; migrations written in TS with `up`/`down`
-  receiving the adapter's raw handle.
-- Schema diffing helper to generate an initial migration from `defineModel`
-  schemas.
+### v2.4.0 — Migraciones ✅ Done
+- `indigodb-migrate` CLI: `create`, `up`, `down`, `status`.
+- Migration history table/collection defined via the existing `defineModel()`
+  (no backend-specific bookkeeping); migrations are plain JS files with
+  `up`/`down` receiving a `MigrationContext.raw()` handle.
+- Ordering uses an explicit monotonic `sequence` column, not `appliedAt`
+  alone — avoids ties when several migrations apply within one DATE tick.
 
 ### v2.5.0 — Realtime avanzado
 - Filtered subscriptions: clients subscribe to specific models/criteria over

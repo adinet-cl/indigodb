@@ -254,6 +254,50 @@ adapter.emitChange() ──▶ IndigoDB.emit("change") ──▶ your listener
 - **PostgreSQL** detects changes with a per-table trigger that calls `pg_notify` on the `indigodb_changes` channel; a dedicated `LISTEN` client (separate from the query `Pool`) receives them.
 - **MongoDB** detects changes with a `collection.watch()` change stream (requires a replica set).
 
+## Schema migrations
+
+`CREATE TABLE IF NOT EXISTS` (run by `defineModel`) never alters an existing table, so schema changes on a live database need real migrations. IndigoDB ships a small runner plus a CLI:
+
+```bash
+npx indigodb-migrate create "add users table"   # scaffolds migrations/<timestamp>_add_users_table.js
+npx indigodb-migrate up                          # applies every pending migration
+npx indigodb-migrate down                        # reverts the most recently applied one
+npx indigodb-migrate status                      # { applied, pending }
+```
+
+The CLI reads `indigodb.config.js` (or `--config <path>`) from the working directory:
+
+```javascript
+// indigodb.config.js
+module.exports = {
+  database: { type: "postgresql", host: "localhost", database: "myapp" },
+  migrationsDir: "./migrations", // optional, defaults to "./migrations"
+};
+```
+
+A migration file exports `up`/`down` functions that receive a `MigrationContext` — the same `raw()` escape hatch as `db.raw()`:
+
+```javascript
+// migrations/1700000000000_add_users_table.js
+module.exports = {
+  async up(ctx) {
+    await ctx.raw("CREATE TABLE users (id SERIAL PRIMARY KEY, email VARCHAR(255) UNIQUE)");
+  },
+  async down(ctx) {
+    await ctx.raw("DROP TABLE users");
+  },
+};
+```
+
+Applied migrations are tracked in a history table/collection (default name `indigodb_migrations`) defined the same way any other model is — no backend-specific bookkeeping. You can also drive it programmatically:
+
+```typescript
+import { MigrationRunner } from "@adinet/indigodb";
+
+const runner = new MigrationRunner(db, { directory: "./migrations" });
+await runner.up();
+```
+
 ## Testing
 
 The default suite is fully mocked and needs **no database**:
