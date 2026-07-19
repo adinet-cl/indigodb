@@ -1,0 +1,110 @@
+import { Client, Pool } from "pg";
+import { DatabaseAdapter } from "../adapter";
+import { PostgresModel } from "./postgresModel";
+import { NOTIFICATION_CHANNEL } from "./constants";
+import { ChangeEvent, ModelSchema, PostgresConfig } from "../../types";
+import { ConnectionError } from "../../errors";
+import { Logger, noopLogger } from "../../logger";
+
+const LISTENER_RETRY_DELAY_MS = 5000;
+
+/**
+ * PostgreSQL backend: a Pool serves regular queries while a dedicated Client
+ * holds the LISTEN subscription that feeds real-time change events.
+ */
+export class PostgresAdapter extends DatabaseAdapter {
+  private pool?: Pool;
+  private listenClient?: Client;
+  private closing = false;
+  private restartPending = false;
+
+  constructor(
+    private readonly config: PostgresConfig,
+    private readonly logger: Logger = noopLogger
+  ) {
+    super();
+  }
+
+  public async connect(): Promise<void> {
+    this.pool = new Pool(this.connectionOptions());
+    this.pool.on("error", (err) => {
+      this.logger.error("PostgreSQL pool error", err);
+    });
+    // Fail fast on bad credentials/host instead of on the first query.
+    await this.pool.query("SELECT 1");
+    await this.startListener();
+  }
+
+  private connectionOptions() {
+    const { connectionString, host, port, user, password, database } =
+      this.config;
+    return connectionString
+      ? { connectionString }
+      : { host, port, user, password, database };
+  }
+
+  private async startListener(): Promise<void> {
+    const client = new Client(this.connectionOptions());
+    this.listenClient = client;
+
+    client.on("error", (err) => {
+      this.logger.error("PostgreSQL listen connection error", err);
+      this.scheduleListenerRestart();
+    });
+
+    client.on("notification", (msg) => {
+      if (!msg.payload) return;
+      try {
+        const event = JSON.parse(msg.payload) as ChangeEvent;
+        this.emitChange(event);
+      } catch (err) {
+        this.logger.warn("Ignoring malformed notification payload", err);
+      }
+    });
+
+    await client.connect();
+    await client.query(`LISTEN ${NOTIFICATION_CHANNEL}`);
+    this.logger.debug(`Listening on channel "${NOTIFICATION_CHANNEL}"`);
+  }
+
+  private scheduleListenerRestart(): void {
+    if (this.closing || this.restartPending) return;
+    this.restartPending = true;
+
+    const timer = setTimeout(() => {
+      this.restartPending = false;
+      if (this.closing) return;
+      this.startListener().catch((err) => {
+        this.logger.error("Failed to restart PostgreSQL listener", err);
+        this.scheduleListenerRestart();
+      });
+    }, LISTENER_RETRY_DELAY_MS);
+    timer.unref();
+  }
+
+  public async defineModel<T>(
+    name: string,
+    schema: ModelSchema
+  ): Promise<PostgresModel<T>> {
+    if (!this.pool) {
+      throw new ConnectionError("PostgresAdapter is not connected");
+    }
+    const model = new PostgresModel<T>(name, schema, this.pool);
+    await model.init();
+    return model;
+  }
+
+  public async disconnect(): Promise<void> {
+    this.closing = true;
+    if (this.listenClient) {
+      await this.listenClient.end().catch((err) => {
+        this.logger.warn("Error closing listen connection", err);
+      });
+      this.listenClient = undefined;
+    }
+    if (this.pool) {
+      await this.pool.end();
+      this.pool = undefined;
+    }
+  }
+}
