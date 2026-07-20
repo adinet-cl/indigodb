@@ -612,3 +612,166 @@ describe("PostgresModel relations", () => {
     expect(postsPool.query).not.toHaveBeenCalled();
   });
 });
+
+describe("PostgresModel extended data types", () => {
+  test("createTable emits the DDL for every new type, including length/precision/scale", async () => {
+    const pool = makePool();
+    const model = new PostgresModel(
+      "widgets",
+      {
+        id: { type: DataTypes.INTEGER, primaryKey: true },
+        bigCount: { type: DataTypes.BIGINT },
+        precise: { type: DataTypes.DOUBLE },
+        price: { type: DataTypes.DECIMAL, precision: 10, scale: 2 },
+        rawDecimal: { type: DataTypes.DECIMAL },
+        code: { type: DataTypes.STRING, length: 40 },
+        externalId: { type: DataTypes.UUID },
+        publishedOn: { type: DataTypes.DATEONLY },
+        payload: { type: DataTypes.BINARY },
+      },
+      pool
+    );
+    await model.init();
+
+    const sql = pool.query.mock.calls[0][0] as string;
+    expect(sql).toContain('"bigCount" BIGINT');
+    expect(sql).toContain('"precise" DOUBLE PRECISION');
+    expect(sql).toContain('"price" NUMERIC(10, 2)');
+    expect(sql).toContain('"rawDecimal" NUMERIC');
+    expect(sql).not.toContain('"rawDecimal" NUMERIC(');
+    expect(sql).toContain('"code" VARCHAR(40)');
+    expect(sql).toContain('"externalId" UUID');
+    expect(sql).toContain('"publishedOn" DATE');
+    expect(sql).toContain('"payload" BYTEA');
+  });
+
+  test("ENUM emits a TEXT column with a CHECK constraint, escaping single quotes", async () => {
+    const pool = makePool();
+    const model = new PostgresModel(
+      "tickets",
+      {
+        id: { type: DataTypes.INTEGER, primaryKey: true },
+        status: {
+          type: DataTypes.ENUM,
+          values: ["open", "closed", "won't fix"],
+        },
+      },
+      pool
+    );
+    await model.init();
+
+    const sql = pool.query.mock.calls[0][0] as string;
+    expect(sql).toContain(
+      `"status" TEXT CHECK ("status" IN ('open', 'closed', 'won''t fix'))`
+    );
+  });
+
+  test("constructor throws ConfigurationError for a misconfigured schema", () => {
+    const pool = makePool();
+    expect(
+      () =>
+        new PostgresModel(
+          "t",
+          {
+            id: { type: DataTypes.INTEGER, primaryKey: true },
+            status: { type: DataTypes.ENUM },
+          },
+          pool
+        )
+    ).toThrow(ConfigurationError);
+    expect(
+      () =>
+        new PostgresModel(
+          "t",
+          {
+            id: { type: DataTypes.INTEGER, primaryKey: true },
+            name: { type: DataTypes.STRING, values: ["a"] },
+          },
+          pool
+        )
+    ).toThrow(ConfigurationError);
+    expect(
+      () =>
+        new PostgresModel(
+          "t",
+          {
+            id: { type: DataTypes.INTEGER, primaryKey: true },
+            name: { type: DataTypes.STRING, length: -1 },
+          },
+          pool
+        )
+    ).toThrow(ConfigurationError);
+    expect(
+      () =>
+        new PostgresModel(
+          "t",
+          {
+            id: { type: DataTypes.INTEGER, primaryKey: true },
+            amount: { type: DataTypes.INTEGER, precision: 5 },
+          },
+          pool
+        )
+    ).toThrow(ConfigurationError);
+  });
+
+  test("create rejects a value outside the declared ENUM values", async () => {
+    const pool = makePool();
+    const model = new PostgresModel(
+      "tickets",
+      {
+        id: { type: DataTypes.INTEGER, primaryKey: true },
+        status: { type: DataTypes.ENUM, values: ["open", "closed"] },
+      },
+      pool
+    );
+    await expect(model.create({ status: "bogus" } as never)).rejects.toThrow(
+      ValidationError
+    );
+  });
+
+  test("update rejects a value outside the declared ENUM values", async () => {
+    const pool = makePool([{ id: 1, status: "open" }]);
+    const model = new PostgresModel(
+      "tickets",
+      {
+        id: { type: DataTypes.INTEGER, primaryKey: true },
+        status: { type: DataTypes.ENUM, values: ["open", "closed"] },
+      },
+      pool
+    );
+    await expect(model.update(1, { status: "bogus" } as never)).rejects.toThrow(
+      ValidationError
+    );
+  });
+
+  test("createMany rejects a row with an invalid ENUM value", async () => {
+    const pool = makePool();
+    const model = new PostgresModel(
+      "tickets",
+      {
+        id: { type: DataTypes.INTEGER, primaryKey: true },
+        status: { type: DataTypes.ENUM, values: ["open", "closed"] },
+      },
+      pool
+    );
+    await expect(
+      model.createMany([{ status: "open" }, { status: "bogus" }] as never)
+    ).rejects.toThrow(ValidationError);
+  });
+
+  test("a valid ENUM value passes through untouched", async () => {
+    const pool = makePool([{ id: 1, status: "open" }]);
+    const model = new PostgresModel(
+      "tickets",
+      {
+        id: { type: DataTypes.INTEGER, primaryKey: true },
+        status: { type: DataTypes.ENUM, values: ["open", "closed"] },
+      },
+      pool
+    );
+    await expect(model.create({ status: "open" } as never)).resolves.toEqual({
+      id: 1,
+      status: "open",
+    });
+  });
+});

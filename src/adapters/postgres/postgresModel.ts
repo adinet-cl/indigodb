@@ -1,6 +1,6 @@
 import type { Pool } from "pg";
 import { BaseModel } from "../../models/baseModel";
-import { ModelOptions, ModelSchema } from "../../types";
+import { ColumnDefinition, ModelOptions, ModelSchema } from "../../types";
 import { assertValidIdentifier } from "../../identifiers";
 import { POSTGRES_TYPE_MAP } from "../../dataTypes";
 import { QueryError, UnsupportedTypeError } from "../../errors";
@@ -28,6 +28,24 @@ export interface QueryExecutor {
  */
 function quote(identifier: string): string {
   return `"${identifier}"`;
+}
+
+/** Escapes a string as a single-quoted SQL literal (for ENUM CHECK constraints). */
+function quoteLiteral(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
+/** Resolves the base SQL type, applying STRING length / DECIMAL precision+scale. */
+function resolveSqlType(props: ColumnDefinition): string {
+  if (props.type === "STRING") {
+    return `VARCHAR(${props.length ?? 255})`;
+  }
+  if (props.type === "DECIMAL" && props.precision !== undefined) {
+    return props.scale !== undefined
+      ? `NUMERIC(${props.precision}, ${props.scale})`
+      : `NUMERIC(${props.precision})`;
+  }
+  return POSTGRES_TYPE_MAP[props.type];
 }
 
 export class PostgresModel<T> extends BaseModel<T> {
@@ -70,11 +88,11 @@ export class PostgresModel<T> extends BaseModel<T> {
   private async createTable(): Promise<void> {
     const columns: string[] = [];
     for (const [columnName, columnProps] of Object.entries(this.schema)) {
-      const sqlType = POSTGRES_TYPE_MAP[columnProps.type];
-      if (!sqlType) {
+      if (!POSTGRES_TYPE_MAP[columnProps.type]) {
         throw new UnsupportedTypeError(columnProps.type);
       }
-      let columnDef = `${quote(columnName)} ${sqlType}`;
+      const quotedColumn = quote(columnName);
+      let columnDef = `${quotedColumn} ${resolveSqlType(columnProps)}`;
       if (columnProps.autoIncrement)
         columnDef += " GENERATED ALWAYS AS IDENTITY";
       if (columnProps.primaryKey) columnDef += " PRIMARY KEY";
@@ -89,6 +107,10 @@ export class PostgresModel<T> extends BaseModel<T> {
           assertValidIdentifier(columnProps.references.column ?? "id")
         );
         columnDef += ` REFERENCES ${refTable} (${refColumn})`;
+      }
+      if (columnProps.type === "ENUM") {
+        const allowed = columnProps.values!.map(quoteLiteral).join(", ");
+        columnDef += ` CHECK (${quotedColumn} IN (${allowed}))`;
       }
       columns.push(columnDef);
     }

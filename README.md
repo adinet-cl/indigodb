@@ -321,12 +321,35 @@ await db.raw({ ping: 1 });
 | IndigoDB type | PostgreSQL | MongoDB |
 | --- | --- | --- |
 | `INTEGER` | `INTEGER` | `Number` |
-| `STRING` | `VARCHAR(255)` | `String` |
+| `BIGINT` | `BIGINT` | `Number` (JS precision limit applies — see below) |
 | `FLOAT` | `REAL` | `Number` |
+| `DOUBLE` | `DOUBLE PRECISION` | `Number` |
+| `DECIMAL` | `NUMERIC` (or `NUMERIC(precision, scale)`) | `String` (exact precision — see below) |
+| `STRING` | `VARCHAR(255)` (or `VARCHAR(length)`) | `String` |
+| `TEXT` | `TEXT` | `String` |
 | `BOOLEAN` | `BOOLEAN` | `Boolean` |
 | `DATE` | `TIMESTAMP` | `Date` |
-| `TEXT` | `TEXT` | `String` |
+| `DATEONLY` | `DATE` | `Date` |
+| `UUID` | `UUID` | `String` |
+| `ENUM` | `TEXT` + `CHECK` constraint | `String`, validated in the ORM |
+| `BINARY` | `BYTEA` | `Buffer`, passed through unchanged |
 | `JSON` | `JSONB` | `Object` |
+
+Some types take extra options on the column definition:
+
+```typescript
+const Accounts = await db.defineModel<Account>("accounts", {
+  id: { type: DataTypes.UUID, primaryKey: true, default: () => crypto.randomUUID() },
+  code: { type: DataTypes.STRING, length: 12 },              // VARCHAR(12) instead of the default 255
+  balance: { type: DataTypes.DECIMAL, precision: 12, scale: 2 }, // NUMERIC(12, 2)
+  status: { type: DataTypes.ENUM, values: ["active", "suspended", "closed"] },
+});
+```
+
+- **`DECIMAL`** is returned as a `string` on both backends (PostgreSQL's driver already does this for `NUMERIC`; MongoDB has no fixed-point type, so IndigoDB stores it as a string too) — a JS `Number` would silently round money-style values. Parse with a decimal library if you need arithmetic.
+- **`BIGINT`** is still coerced through `Number`, so values beyond `Number.MAX_SAFE_INTEGER` (2^53) lose precision — fine for most IDs/counters, but avoid it for values that can legitimately exceed that range.
+- **`ENUM`** requires `values: string[]`; anything outside that list is rejected with a `ValidationError` on `create()`/`update()` (and the bulk variants) on **both** backends — PostgreSQL additionally enforces it at the database level with a `CHECK` constraint.
+- Misconfigured columns (`ENUM` without `values`, `length`/`precision`/`scale` used on the wrong type, a non-positive `length`) throw `ConfigurationError` at `defineModel()` time.
 
 ## Architecture
 

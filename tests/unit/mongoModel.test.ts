@@ -642,3 +642,131 @@ describe("MongoModel relations", () => {
     ).toBe("Ada");
   });
 });
+
+describe("MongoModel extended data types", () => {
+  interface Widget {
+    _id?: unknown;
+    bigCount: number;
+    precise: number;
+    price: string;
+    externalId: string;
+    publishedOn: Date;
+    payload: Buffer;
+    status: string;
+  }
+
+  const widgetSchema: ModelSchema = {
+    bigCount: { type: DataTypes.BIGINT },
+    precise: { type: DataTypes.DOUBLE },
+    price: { type: DataTypes.DECIMAL },
+    externalId: { type: DataTypes.UUID },
+    publishedOn: { type: DataTypes.DATEONLY },
+    payload: { type: DataTypes.BINARY },
+    status: { type: DataTypes.ENUM, values: ["draft", "live"] },
+  };
+
+  test("coerces BIGINT/DOUBLE to Number, DECIMAL to String, DATEONLY to Date", async () => {
+    const collection = makeCollection();
+    collection.findOne.mockResolvedValue({ _id: new ObjectId() });
+    const model = new MongoModel<Widget>(
+      "widgets",
+      widgetSchema,
+      collection as never
+    );
+
+    await model.create({
+      bigCount: "123" as never,
+      precise: "9.5" as never,
+      price: 19.999 as never,
+      publishedOn: "2026-01-01" as never,
+      status: "draft",
+    });
+
+    const inserted = collection.insertOne.mock.calls[0][0];
+    expect(inserted.bigCount).toBe(123);
+    expect(inserted.precise).toBe(9.5);
+    expect(inserted.price).toBe("19.999");
+    expect(inserted.publishedOn).toBeInstanceOf(Date);
+  });
+
+  test("BINARY passes a Buffer through unchanged", async () => {
+    const collection = makeCollection();
+    collection.findOne.mockResolvedValue({ _id: new ObjectId() });
+    const model = new MongoModel<Widget>(
+      "widgets",
+      widgetSchema,
+      collection as never
+    );
+    const buffer = Buffer.from("hello");
+
+    await model.create({ payload: buffer, status: "draft" } as never);
+
+    expect(collection.insertOne.mock.calls[0][0].payload).toBe(buffer);
+  });
+
+  test("UUID is coerced to a string", async () => {
+    const collection = makeCollection();
+    collection.findOne.mockResolvedValue({ _id: new ObjectId() });
+    const model = new MongoModel<Widget>(
+      "widgets",
+      widgetSchema,
+      collection as never
+    );
+
+    await model.create({ externalId: 42 as never, status: "draft" });
+
+    expect(collection.insertOne.mock.calls[0][0].externalId).toBe("42");
+  });
+
+  test("create rejects a value outside the declared ENUM values", async () => {
+    const collection = makeCollection();
+    const model = new MongoModel<Widget>(
+      "widgets",
+      widgetSchema,
+      collection as never
+    );
+    await expect(model.create({ status: "bogus" } as never)).rejects.toThrow(
+      ValidationError
+    );
+  });
+
+  test("update rejects a value outside the declared ENUM values", async () => {
+    const collection = makeCollection();
+    const model = new MongoModel<Widget>(
+      "widgets",
+      widgetSchema,
+      collection as never
+    );
+    await expect(
+      model.update(new ObjectId(), { status: "bogus" } as never)
+    ).rejects.toThrow(ValidationError);
+  });
+
+  test("a valid ENUM value is coerced to a string and passes through", async () => {
+    const collection = makeCollection();
+    collection.findOne.mockResolvedValue({
+      _id: new ObjectId(),
+      status: "live",
+    });
+    const model = new MongoModel<Widget>(
+      "widgets",
+      widgetSchema,
+      collection as never
+    );
+
+    await model.create({ status: "live" });
+    expect(collection.insertOne.mock.calls[0][0].status).toBe("live");
+  });
+
+  test("constructor throws ConfigurationError for a misconfigured schema", () => {
+    const collection = makeCollection();
+    expect(
+      () =>
+        new MongoModel(
+          "widgets",
+          { status: { type: DataTypes.ENUM } },
+          collection as never
+        )
+    ).toThrow(ConfigurationError);
+  });
+});

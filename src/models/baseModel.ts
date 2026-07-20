@@ -62,6 +62,7 @@ export abstract class BaseModel<T> {
           updatedAt: { type: "DATE" },
         }
       : schema;
+    this.assertValidSchema(this.schema);
 
     const declaredPrimaryKey = Object.entries(schema).find(
       ([, definition]) => definition.primaryKey
@@ -73,6 +74,82 @@ export abstract class BaseModel<T> {
       );
     }
     this.primaryKey = primaryKey;
+  }
+
+  /**
+   * Validates type-specific column options at schema-definition time, so a
+   * misconfigured column fails fast instead of producing bad DDL or silently
+   * accepting invalid data later.
+   */
+  private assertValidSchema(schema: ModelSchema): void {
+    for (const [column, definition] of Object.entries(schema)) {
+      if (definition.type === "ENUM") {
+        if (!definition.values || definition.values.length === 0) {
+          throw new ConfigurationError(
+            `Column "${column}" on model "${this.name}" is ENUM but declares no "values"`
+          );
+        }
+      } else if (definition.values) {
+        throw new ConfigurationError(
+          `Column "${column}" on model "${this.name}" declares "values" but is not ENUM`
+        );
+      }
+
+      if (definition.length !== undefined) {
+        if (definition.type !== "STRING") {
+          throw new ConfigurationError(
+            `Column "${column}" on model "${this.name}" declares "length" but is not STRING`
+          );
+        }
+        if (!Number.isInteger(definition.length) || definition.length <= 0) {
+          throw new ConfigurationError(
+            `Column "${column}" on model "${this.name}": "length" must be a positive integer`
+          );
+        }
+      }
+
+      if (
+        definition.precision !== undefined ||
+        definition.scale !== undefined
+      ) {
+        if (definition.type !== "DECIMAL") {
+          throw new ConfigurationError(
+            `Column "${column}" on model "${this.name}" declares "precision"/"scale" but is not DECIMAL`
+          );
+        }
+        for (const [key, value] of [
+          ["precision", definition.precision],
+          ["scale", definition.scale],
+        ] as const) {
+          if (value !== undefined && (!Number.isInteger(value) || value < 0)) {
+            throw new ConfigurationError(
+              `Column "${column}" on model "${this.name}": "${key}" must be a non-negative integer`
+            );
+          }
+        }
+      }
+    }
+  }
+
+  /** Rejects ENUM column values that aren't in the declared `values` list. */
+  protected assertEnumValues(data: Record<string, unknown>): void {
+    for (const [column, value] of Object.entries(data)) {
+      const definition = this.schema[column];
+      if (
+        definition?.type !== "ENUM" ||
+        value === undefined ||
+        value === null
+      ) {
+        continue;
+      }
+      if (!definition.values!.includes(value as string)) {
+        throw new ValidationError(
+          column,
+          this.name,
+          `must be one of: ${definition.values!.join(", ")} (got ${JSON.stringify(value)})`
+        );
+      }
+    }
   }
 
   /** Fills in `default` values for columns missing from the payload. */
@@ -112,6 +189,7 @@ export abstract class BaseModel<T> {
       ? { ...withDefaults, createdAt: new Date(), updatedAt: new Date() }
       : withDefaults;
     this.assertRequiredColumns(withTimestamps);
+    this.assertEnumValues(withTimestamps);
     return withTimestamps;
   }
 
@@ -119,6 +197,7 @@ export abstract class BaseModel<T> {
   protected prepareForUpdate(
     data: Record<string, unknown>
   ): Record<string, unknown> {
+    this.assertEnumValues(data);
     return this.timestamps ? { ...data, updatedAt: new Date() } : data;
   }
 
