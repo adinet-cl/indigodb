@@ -4,6 +4,49 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.2.0] - 2026-07-19
+
+Production hardening. Purely additive (all new `ModelOptions`/config fields
+are optional), driven by a gap analysis of what breaks a real deployment
+that the mocked test suite alone wouldn't surface.
+
+### Added
+
+- **`ModelOptions.redact`**: column names stripped from every `ChangeEvent`
+  for that model before it is emitted in-process or broadcast over
+  WebSocket — e.g. `redact: ["passwordHash"]`. CRUD results themselves are
+  never redacted, only real-time events. Redacting an unknown column throws
+  `ConfigurationError` at `defineModel()` time.
+- **`ModelOptions.broadcast`**: set to `false` to opt a model out of
+  real-time entirely — no Postgres trigger is created (an existing one is
+  dropped) and no MongoDB change stream is opened for it.
+- **`PostgresConfig.ssl` / `.pool`**: TLS options and connection-pool tuning
+  (`max`, `min`, `idleTimeoutMillis`, `connectionTimeoutMillis`), passed
+  through to the `pg` driver. `ssl` also applies to the dedicated `LISTEN`
+  connection; `pool` does not (it only applies to the query pool).
+- **`MongoConfig.options`**: extra driver options passed straight to the
+  `MongoClient` constructor (TLS, auth, pool sizing, ...).
+- **MongoDB change-stream auto-resume**: on a stream error the adapter now
+  retries with `resumeAfter: <last seen token>` instead of leaving real-time
+  dead until the process restarts. If the resume attempt itself fails before
+  observing a new change (the token is presumably no longer in the oplog),
+  it logs a warning and restarts fresh.
+- **`ChangeEvent.truncated`**: set by the PostgreSQL trigger when a row
+  exceeds the ~8KB `pg_notify` payload limit — `data` then carries only the
+  primary key instead of aborting the trigger (and the user's write).
+
+### Fixed
+
+- The PostgreSQL notification trigger now wraps `pg_notify` in its own
+  `EXCEPTION` handler, so any failure in the real-time path (oversized
+  payload, channel issue) can never abort the triggering
+  INSERT/UPDATE/DELETE. Real-time was already best-effort in spirit; now it
+  actually is in practice.
+- **Silent schema drift**: `defineModel()` now compares the live table's
+  columns against the schema on every `connect()` and logs a warning
+  (naming the missing columns, pointing at `indigodb-migrate`) instead of
+  staying silent until the first query fails with "column does not exist".
+
 ## [3.1.0] - 2026-07-19
 
 Complete data types. Purely additive, no existing signature changes.

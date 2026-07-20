@@ -5,6 +5,7 @@ import {
   Db,
   Document,
   MongoClient,
+  MongoClientOptions,
 } from "mongodb";
 import { DatabaseAdapter, TransactionContext } from "../adapter";
 import { BaseModel } from "../../models/baseModel";
@@ -23,9 +24,12 @@ import { Logger, noopLogger } from "../../logger";
  * real-time change events. All streams are tracked so disconnect() can close
  * them cleanly.
  */
+const STREAM_RETRY_DELAY_MS = 5000;
+
 export class MongoAdapter extends DatabaseAdapter {
   private client?: MongoClient;
   private db?: Db;
+  private closing = false;
   private readonly changeStreams: ChangeStream[] = [];
   private readonly models = new Map<string, MongoModel<unknown>>();
 
@@ -42,7 +46,11 @@ export class MongoAdapter extends DatabaseAdapter {
   }
 
   public async connect(): Promise<void> {
-    this.client = new MongoClient(this.config.connectionString);
+    this.closing = false;
+    this.client = new MongoClient(
+      this.config.connectionString,
+      this.config.options as MongoClientOptions | undefined
+    );
     await this.client.connect();
     this.db = this.client.db(this.config.database);
     this.logger.debug("Connected to MongoDB");
@@ -72,28 +80,81 @@ export class MongoAdapter extends DatabaseAdapter {
     }
     await model.init();
     this.models.set(model.name, model as MongoModel<unknown>);
-    this.watchCollection(model.name, collection);
+    this.trackRedaction(model as unknown as BaseModel<unknown>);
+    if (model.broadcastEnabled) {
+      this.watchCollection(model.name, collection);
+    }
     return model;
   }
 
   private watchCollection(
     modelName: string,
-    collection: Collection<Document>
+    collection: Collection<Document>,
+    resumeToken?: unknown
   ): void {
-    const stream = collection.watch([], { fullDocument: "updateLookup" });
+    const stream = collection.watch([], {
+      fullDocument: "updateLookup",
+      ...(resumeToken ? { resumeAfter: resumeToken } : {}),
+    });
     this.changeStreams.push(stream);
 
+    // Track the latest resume token so an interrupted stream can pick up
+    // where it left off instead of silently missing events.
+    let lastToken: unknown = resumeToken;
+
     stream.on("change", (change: ChangeStreamDocument<Document>) => {
+      lastToken = change._id;
       const event = this.toChangeEvent(modelName, change);
       if (event) this.emitChange(event);
     });
 
     stream.on("error", (err) => {
       this.logger.error(
-        `Change stream error for collection "${modelName}"`,
+        `Change stream error for collection "${modelName}"; scheduling restart`,
         err
       );
+      const index = this.changeStreams.indexOf(stream);
+      if (index !== -1) this.changeStreams.splice(index, 1);
+      void stream.close().catch(() => undefined);
+      // If this stream was a resume attempt that failed before delivering a
+      // single change, the token is likely no longer in the oplog — restart
+      // fresh and warn that events may have been missed. Otherwise resume
+      // from the newest token we saw.
+      const tokenIsStale =
+        resumeToken !== undefined && lastToken === resumeToken;
+      if (tokenIsStale) {
+        this.logger.warn(
+          `Resume token for "${modelName}" appears invalid; restarting the ` +
+            `change stream from now — events may have been missed.`
+        );
+      }
+      this.scheduleWatchRestart(
+        modelName,
+        collection,
+        tokenIsStale ? undefined : lastToken
+      );
     });
+  }
+
+  private scheduleWatchRestart(
+    modelName: string,
+    collection: Collection<Document>,
+    resumeToken?: unknown
+  ): void {
+    if (this.closing) return;
+    const timer = setTimeout(() => {
+      if (this.closing) return;
+      try {
+        this.watchCollection(modelName, collection, resumeToken);
+      } catch (err) {
+        this.logger.error(
+          `Failed to restart change stream for "${modelName}"`,
+          err
+        );
+        this.scheduleWatchRestart(modelName, collection, resumeToken);
+      }
+    }, STREAM_RETRY_DELAY_MS);
+    timer.unref();
   }
 
   private toChangeEvent(
@@ -173,6 +234,7 @@ export class MongoAdapter extends DatabaseAdapter {
   }
 
   public async disconnect(): Promise<void> {
+    this.closing = true;
     await Promise.all(
       this.changeStreams.map((stream) =>
         stream.close().catch((err) => {

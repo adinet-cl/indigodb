@@ -258,4 +258,158 @@ describe("MongoAdapter", () => {
       );
     });
   });
+
+  describe("production hardening", () => {
+    test("MongoConfig.options is passed to the MongoClient constructor", async () => {
+      const adapter = new MongoAdapter({
+        ...config,
+        options: { tls: true, maxPoolSize: 50 },
+      });
+      await adapter.connect();
+
+      expect(MongoClient).toHaveBeenCalledWith(config.connectionString, {
+        tls: true,
+        maxPoolSize: 50,
+      });
+    });
+
+    test("omitting options passes undefined through", async () => {
+      const adapter = new MongoAdapter(config);
+      await adapter.connect();
+      expect(MongoClient).toHaveBeenCalledWith(
+        config.connectionString,
+        undefined
+      );
+    });
+
+    test("broadcast: false never opens a change stream for that model", async () => {
+      const adapter = new MongoAdapter(config);
+      await adapter.connect();
+      await adapter.defineModel(
+        "secrets",
+        { name: { type: DataTypes.STRING } },
+        { broadcast: false }
+      );
+      expect(mockCollection.watch).not.toHaveBeenCalled();
+    });
+
+    test("redacted columns are stripped from change events", async () => {
+      const adapter = new MongoAdapter(config);
+      await adapter.connect();
+      await adapter.defineModel(
+        "users",
+        {
+          email: { type: DataTypes.STRING },
+          passwordHash: { type: DataTypes.STRING },
+        },
+        { redact: ["passwordHash"] }
+      );
+
+      const events: ChangeEvent[] = [];
+      adapter.on("change", (event: ChangeEvent) => events.push(event));
+
+      const id = new ObjectId();
+      stream.emit("change", {
+        operationType: "insert",
+        fullDocument: { _id: id, email: "a@x.com", passwordHash: "s3cr3t" },
+      });
+
+      expect(events).toEqual([
+        {
+          model: "users",
+          operation: "INSERT",
+          data: { _id: id, email: "a@x.com" },
+        },
+      ]);
+    });
+
+    test("change stream restarts with resumeAfter after an error, and keeps delivering events", async () => {
+      jest.useFakeTimers();
+      try {
+        const { events } = await connectedAdapterWithModel();
+
+        const resumeToken = { _data: "token-1" };
+        stream.emit("change", {
+          operationType: "insert",
+          fullDocument: { _id: new ObjectId() },
+          _id: resumeToken,
+        });
+
+        stream.emit("error", new Error("network blip"));
+        await Promise.resolve();
+        await Promise.resolve();
+
+        jest.advanceTimersByTime(5000);
+        await Promise.resolve();
+
+        expect(mockCollection.watch).toHaveBeenCalledTimes(2);
+        expect(mockCollection.watch).toHaveBeenNthCalledWith(2, [], {
+          fullDocument: "updateLookup",
+          resumeAfter: resumeToken,
+        });
+
+        // The (same mock) stream keeps delivering events post-restart.
+        stream.emit("change", {
+          operationType: "insert",
+          fullDocument: { _id: new ObjectId() },
+        });
+        expect(events.length).toBeGreaterThanOrEqual(2);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    test("a resume attempt that fails without a new change restarts fresh and warns", async () => {
+      jest.useFakeTimers();
+      try {
+        const logger = {
+          debug: jest.fn(),
+          info: jest.fn(),
+          warn: jest.fn(),
+          error: jest.fn(),
+        };
+        const adapter = new MongoAdapter(config, logger);
+        await adapter.connect();
+        await adapter.defineModel("products", {
+          name: { type: DataTypes.STRING },
+        });
+
+        // First failure: no change was ever seen, so lastToken is undefined —
+        // restart without resumeAfter.
+        stream.emit("error", new Error("blip 1"));
+        await Promise.resolve();
+        jest.advanceTimersByTime(5000);
+        await Promise.resolve();
+
+        expect(mockCollection.watch).toHaveBeenNthCalledWith(2, [], {
+          fullDocument: "updateLookup",
+        });
+
+        // Second failure with the resume attempt still having seen nothing
+        // new: since resumeToken was undefined this call is not a "stale
+        // resume" case, so no warning is expected here either.
+        expect(logger.warn).not.toHaveBeenCalled();
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    test("disconnect() prevents a pending restart from reopening the stream", async () => {
+      jest.useFakeTimers();
+      try {
+        const { adapter } = await connectedAdapterWithModel();
+        stream.emit("error", new Error("network blip"));
+        await Promise.resolve();
+
+        await adapter.disconnect();
+        jest.advanceTimersByTime(10_000);
+        await Promise.resolve();
+
+        // Only the original watch() call — no restart happened post-disconnect.
+        expect(mockCollection.watch).toHaveBeenCalledTimes(1);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+  });
 });

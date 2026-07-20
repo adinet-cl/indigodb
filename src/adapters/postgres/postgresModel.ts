@@ -12,6 +12,13 @@ import {
 } from "../../query/where";
 import { compileWhere } from "./whereCompiler";
 import { HookRegistry } from "../../models/hooks";
+import { Logger, noopLogger } from "../../logger";
+
+/**
+ * pg_notify payloads are capped at ~8000 bytes; past that the call throws
+ * inside the trigger, which would abort the user's write. Leave headroom.
+ */
+const NOTIFY_PAYLOAD_LIMIT_BYTES = 7900;
 
 /** Minimal query surface the model needs; satisfied by pg.Pool. */
 export interface QueryExecutor {
@@ -50,17 +57,20 @@ function resolveSqlType(props: ColumnDefinition): string {
 
 export class PostgresModel<T> extends BaseModel<T> {
   private readonly pool: QueryExecutor;
+  private readonly logger: Logger;
 
   constructor(
     name: string,
     schema: ModelSchema,
     pool: QueryExecutor | Pool,
     options: ModelOptions = {},
-    sharedHooks?: HookRegistry<T>
+    sharedHooks?: HookRegistry<T>,
+    logger: Logger = noopLogger
   ) {
     // No default primary key: Postgres schemas must declare one explicitly.
     super(name, schema, undefined, options, sharedHooks);
     this.pool = pool as QueryExecutor;
+    this.logger = logger;
   }
 
   /**
@@ -73,8 +83,13 @@ export class PostgresModel<T> extends BaseModel<T> {
       this.name,
       this.schema,
       client,
-      { timestamps: this.timestamps },
-      this.hooks
+      {
+        timestamps: this.timestamps,
+        broadcast: this.broadcastEnabled,
+        redact: [...this.redactedColumns],
+      },
+      this.hooks,
+      this.logger
     );
   }
 
@@ -83,6 +98,7 @@ export class PostgresModel<T> extends BaseModel<T> {
     await this.createTable();
     await this.createIndexes();
     await this.setupTriggers();
+    await this.warnOnSchemaDrift();
   }
 
   private async createTable(): Promise<void> {
@@ -137,6 +153,19 @@ export class PostgresModel<T> extends BaseModel<T> {
     const triggerName = quote(`${this.name}_change_trigger`);
     const table = quote(this.name);
 
+    // broadcast: false — make sure no trigger fires for this model, including
+    // one left behind by a previous run that had broadcasting enabled.
+    if (!this.broadcastEnabled) {
+      await this.pool.query(
+        `DROP TRIGGER IF EXISTS ${triggerName} ON ${table};`
+      );
+      return;
+    }
+
+    // The notify block is wrapped in its own EXCEPTION handler: real-time is
+    // best-effort and must NEVER abort the user's INSERT/UPDATE/DELETE. When
+    // the row exceeds the pg_notify payload limit, fall back to a truncated
+    // event carrying only the primary key.
     const createFunctionQuery = `
       CREATE OR REPLACE FUNCTION ${functionName}() RETURNS trigger AS $$
       DECLARE
@@ -148,12 +177,24 @@ export class PostgresModel<T> extends BaseModel<T> {
         ELSE
           record := NEW;
         END IF;
-        payload := json_build_object(
-          'model', '${this.name}',
-          'operation', TG_OP,
-          'data', row_to_json(record)
-        )::text;
-        PERFORM pg_notify('${NOTIFICATION_CHANNEL}', payload);
+        BEGIN
+          payload := json_build_object(
+            'model', '${this.name}',
+            'operation', TG_OP,
+            'data', row_to_json(record)
+          )::text;
+          IF octet_length(payload) > ${NOTIFY_PAYLOAD_LIMIT_BYTES} THEN
+            payload := json_build_object(
+              'model', '${this.name}',
+              'operation', TG_OP,
+              'truncated', true,
+              'data', json_build_object('${this.primaryKey}', record.${quote(this.primaryKey)})
+            )::text;
+          END IF;
+          PERFORM pg_notify('${NOTIFICATION_CHANNEL}', payload);
+        EXCEPTION WHEN OTHERS THEN
+          NULL;
+        END;
         RETURN NULL;
       END;
       $$ LANGUAGE plpgsql;
@@ -168,6 +209,36 @@ export class PostgresModel<T> extends BaseModel<T> {
 
     await this.pool.query(createFunctionQuery);
     await this.pool.query(createTriggerQuery);
+  }
+
+  /**
+   * CREATE TABLE IF NOT EXISTS never alters an existing table, so a schema
+   * that gained columns silently diverges from the database until the first
+   * failing query. Detect that here and point at the migration tooling.
+   */
+  private async warnOnSchemaDrift(): Promise<void> {
+    const result = await this.pool.query(
+      `SELECT column_name FROM information_schema.columns
+       WHERE table_schema = current_schema() AND table_name = $1;`,
+      [this.name]
+    );
+    const dbColumns = result.rows.map(
+      (row) => (row as { column_name: string }).column_name
+    );
+    // An empty result means we couldn't introspect (permissions, mocks) —
+    // don't warn on unknowns.
+    if (dbColumns.length === 0) return;
+
+    const missing = Object.keys(this.schema).filter(
+      (column) => !dbColumns.includes(column)
+    );
+    if (missing.length > 0) {
+      this.logger.warn(
+        `Table "${this.name}" is missing columns declared in the schema: ` +
+          `${missing.join(", ")}. CREATE TABLE IF NOT EXISTS never alters an ` +
+          `existing table — write a migration (indigodb-migrate create) to add them.`
+      );
+    }
   }
 
   public async create(data: Partial<T>): Promise<T> {

@@ -46,7 +46,11 @@ export class MongoModel<T> extends BaseModel<T> {
       this.name,
       this.schema,
       this.collection,
-      { timestamps: this.timestamps },
+      {
+        timestamps: this.timestamps,
+        broadcast: this.broadcastEnabled,
+        redact: [...this.redactedColumns],
+      },
       this.hooks,
       session
     );

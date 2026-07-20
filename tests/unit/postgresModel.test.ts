@@ -613,6 +613,129 @@ describe("PostgresModel relations", () => {
   });
 });
 
+describe("PostgresModel production hardening", () => {
+  function makeLogger() {
+    return {
+      debug: jest.fn(),
+      info: jest.fn(),
+      warn: jest.fn(),
+      error: jest.fn(),
+    };
+  }
+
+  test("trigger guards the pg_notify payload limit and never aborts the write", async () => {
+    const pool = makePool();
+    const model = new PostgresModel<User>("users", userSchema, pool);
+    await model.init();
+
+    const functionSql = pool.query.mock.calls[1][0] as string;
+    // Oversized rows fall back to a truncated, PK-only payload.
+    expect(functionSql).toContain("octet_length(payload) > 7900");
+    expect(functionSql).toContain("'truncated', true");
+    expect(functionSql).toContain(`json_build_object('id', record."id")`);
+    // And any notify failure is swallowed so the user's write still commits.
+    expect(functionSql).toContain("EXCEPTION WHEN OTHERS THEN");
+  });
+
+  test("broadcast: false drops any existing trigger and creates none", async () => {
+    const pool = makePool();
+    const model = new PostgresModel<User>("users", userSchema, pool, {
+      broadcast: false,
+    });
+    await model.init();
+
+    const statements = pool.query.mock.calls.map((call) => call[0] as string);
+    expect(
+      statements.some((sql) => sql.includes("DROP TRIGGER IF EXISTS"))
+    ).toBe(true);
+    expect(
+      statements.some((sql) => sql.includes("CREATE OR REPLACE FUNCTION"))
+    ).toBe(false);
+    expect(statements.some((sql) => sql.includes("CREATE TRIGGER"))).toBe(
+      false
+    );
+  });
+
+  test("init warns when the live table is missing schema columns", async () => {
+    const logger = makeLogger();
+    const pool = {
+      query: jest
+        .fn()
+        .mockImplementation((sql: string) =>
+          Promise.resolve(
+            sql.includes("information_schema")
+              ? { rows: [{ column_name: "id" }, { column_name: "name" }] }
+              : { rows: [] }
+          )
+        ),
+    };
+    const model = new PostgresModel<User>(
+      "users",
+      userSchema,
+      pool,
+      {},
+      undefined,
+      logger
+    );
+    await model.init();
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining("missing columns declared in the schema: email")
+    );
+    expect(logger.warn.mock.calls[0][0]).toContain("indigodb-migrate");
+  });
+
+  test("init does not warn when the table matches the schema (or introspection is empty)", async () => {
+    const logger = makeLogger();
+    const matchingPool = {
+      query: jest.fn().mockImplementation((sql: string) =>
+        Promise.resolve(
+          sql.includes("information_schema")
+            ? {
+                rows: [
+                  { column_name: "id" },
+                  { column_name: "name" },
+                  { column_name: "email" },
+                ],
+              }
+            : { rows: [] }
+        )
+      ),
+    };
+    const model = new PostgresModel<User>(
+      "users",
+      userSchema,
+      matchingPool,
+      {},
+      undefined,
+      logger
+    );
+    await model.init();
+    expect(logger.warn).not.toHaveBeenCalled();
+
+    // Empty introspection result (mocks, restricted permissions): stay quiet.
+    const emptyModel = new PostgresModel<User>(
+      "users",
+      userSchema,
+      makePool(),
+      {},
+      undefined,
+      logger
+    );
+    await emptyModel.init();
+    expect(logger.warn).not.toHaveBeenCalled();
+  });
+
+  test("redact columns must exist in the schema", () => {
+    expect(
+      () =>
+        new PostgresModel<User>("users", userSchema, makePool(), {
+          redact: ["passwordHash"],
+        })
+    ).toThrow(ConfigurationError);
+  });
+});
+
 describe("PostgresModel extended data types", () => {
   test("createTable emits the DDL for every new type, including length/precision/scale", async () => {
     const pool = makePool();

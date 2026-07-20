@@ -262,4 +262,96 @@ describe("PostgresAdapter", () => {
       );
     });
   });
+
+  describe("production hardening", () => {
+    test("ssl and pool options are passed to the Pool; only ssl reaches the LISTEN client", async () => {
+      const adapter = new PostgresAdapter({
+        ...config,
+        ssl: { rejectUnauthorized: false },
+        pool: { max: 20, idleTimeoutMillis: 5000 },
+      });
+      await adapter.connect();
+
+      expect(Pool).toHaveBeenCalledWith(
+        expect.objectContaining({
+          ssl: { rejectUnauthorized: false },
+          max: 20,
+          idleTimeoutMillis: 5000,
+        })
+      );
+      expect(Client).toHaveBeenCalledWith(
+        expect.objectContaining({ ssl: { rejectUnauthorized: false } })
+      );
+      expect(Client).toHaveBeenCalledWith(
+        expect.not.objectContaining({ max: 20 })
+      );
+    });
+
+    test("omitting ssl/pool keeps the connection options unchanged", async () => {
+      const adapter = new PostgresAdapter(config);
+      await adapter.connect();
+      expect(Pool).toHaveBeenCalledWith(
+        expect.not.objectContaining({ ssl: expect.anything() })
+      );
+    });
+
+    test("redacted columns are stripped from change events", async () => {
+      const adapter = new PostgresAdapter(config);
+      await adapter.connect();
+      await adapter.defineModel(
+        "users",
+        {
+          id: { type: DataTypes.INTEGER, primaryKey: true },
+          email: { type: DataTypes.STRING },
+          passwordHash: { type: DataTypes.STRING },
+        },
+        { redact: ["passwordHash"] }
+      );
+
+      const received: ChangeEvent[] = [];
+      adapter.on("change", (event: ChangeEvent) => received.push(event));
+
+      const listenClient = lastInstance(Client);
+      listenClient.emit("notification", {
+        channel: "indigodb_changes",
+        payload: JSON.stringify({
+          model: "users",
+          operation: "INSERT",
+          data: { id: 1, email: "a@x.com", passwordHash: "s3cr3t" },
+        }),
+      });
+
+      expect(received).toEqual([
+        {
+          model: "users",
+          operation: "INSERT",
+          data: { id: 1, email: "a@x.com" },
+        },
+      ]);
+    });
+
+    test("models without redaction rules broadcast their rows untouched", async () => {
+      const adapter = new PostgresAdapter(config);
+      await adapter.connect();
+      await adapter.defineModel("users", {
+        id: { type: DataTypes.INTEGER, primaryKey: true },
+      });
+
+      const received: ChangeEvent[] = [];
+      adapter.on("change", (event: ChangeEvent) => received.push(event));
+
+      const listenClient = lastInstance(Client);
+      const payload = {
+        model: "users",
+        operation: "INSERT",
+        data: { id: 1, anything: "stays" },
+      };
+      listenClient.emit("notification", {
+        channel: "indigodb_changes",
+        payload: JSON.stringify(payload),
+      });
+
+      expect(received).toEqual([payload]);
+    });
+  });
 });

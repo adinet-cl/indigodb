@@ -33,7 +33,7 @@ export class PostgresAdapter extends DatabaseAdapter {
 
   public async connect(): Promise<void> {
     this.closing = false;
-    this.pool = new Pool(this.connectionOptions());
+    this.pool = new Pool(this.poolOptions());
     this.pool.on("error", (err) => {
       this.logger.error("PostgreSQL pool error", err);
     });
@@ -48,12 +48,20 @@ export class PostgresAdapter extends DatabaseAdapter {
     }
   }
 
-  private connectionOptions() {
-    const { connectionString, host, port, user, password, database } =
+  /** Base connection options (shared by the Pool and the LISTEN client). */
+  private connectionOptions(): Record<string, unknown> {
+    const { connectionString, host, port, user, password, database, ssl } =
       this.config;
-    return connectionString
+    const base: Record<string, unknown> = connectionString
       ? { connectionString }
       : { host, port, user, password, database };
+    if (ssl !== undefined) base.ssl = ssl;
+    return base;
+  }
+
+  /** Pool options additionally carry the user's pool tuning (max, timeouts, ...). */
+  private poolOptions(): Record<string, unknown> {
+    return { ...this.connectionOptions(), ...(this.config.pool ?? {}) };
   }
 
   private async startListener(): Promise<void> {
@@ -112,8 +120,16 @@ export class PostgresAdapter extends DatabaseAdapter {
     if (!this.pool) {
       throw new ConnectionError("PostgresAdapter is not connected");
     }
-    const model = new PostgresModel<T>(name, schema, this.pool, options);
+    const model = new PostgresModel<T>(
+      name,
+      schema,
+      this.pool,
+      options,
+      undefined,
+      this.logger
+    );
     await model.init();
+    this.trackRedaction(model as unknown as BaseModel<unknown>);
     return model;
   }
 
