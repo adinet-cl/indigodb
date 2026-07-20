@@ -5,10 +5,12 @@ release plan toward a feature-complete version. Priorities were set with the
 project owner: transactions, relations, migrations and advanced real-time all
 matter — ordered below by dependency and cost.
 
-**Status: all four priority areas are done as of v3.0.0**, and the data-type
-gap flagged post-release was closed in v3.1.0. The only open item is the
-dual ESM/CJS build — it doesn't block the library being usable end-to-end
-today (Node ESM consumers already interop with the current CJS build).
+**Status: all four priority areas are done as of v3.0.0.** The data-type gap
+flagged post-release was closed in v3.1.0, and a production-hardening pass
+(v3.2.0) closed five correctness/security gaps found by an explicit
+production-readiness review — see below. The only open item is the dual
+ESM/CJS build — it doesn't block the library being usable end-to-end today
+(Node ESM consumers already interop with the current CJS build).
 
 ## Where we are
 
@@ -27,6 +29,7 @@ today (Node ESM consumers already interop with the current CJS build).
 | **Advanced real-time**: filtered subscriptions (`{ type: "subscribe", models, where }`), pluggable `authenticate()`, dependency-free `@adinet/indigodb/client` | ✅ v2.5 |
 | **Relations**: `hasMany` / `belongsTo`, eager loading via `include` (batched `$in`, not JOIN/`$lookup`), `references` FK hints | ✅ v3.0 |
 | **Complete data types**: `BIGINT`, `DOUBLE`, `DECIMAL`, `UUID`, `ENUM`, `DATEONLY`, `BINARY` + `length`/`precision`/`scale`/`values` column options | ✅ v3.1 |
+| **Production hardening**: per-column `redact`, `broadcast: false`, `pg_notify` 8KB guard (never aborts the write), PostgreSQL `ssl`/`pool`, MongoDB driver `options`, schema-drift warning, Mongo change-stream auto-resume | ✅ v3.2 |
 | Mocked unit suite (no DB required) + opt-in integration suite | ✅ v2.0 |
 
 ## What's missing (the gaps)
@@ -87,6 +90,27 @@ today (Node ESM consumers already interop with the current CJS build).
   `ConfigurationError` at `defineModel()` time.
 - ENUM values validated on create/update (+ bulk variants) on both backends;
   PostgreSQL additionally enforces it with a `CHECK` constraint.
+
+### v3.2.0 — Production hardening ✅ Done
+Found via an explicit "what would bite a real deployment" review, not new
+feature requests:
+- **Realtime data leakage**: `ModelOptions.redact` strips named columns from
+  every `ChangeEvent` before it's emitted/broadcast (CRUD results untouched);
+  `ModelOptions.broadcast: false` opts a model out of real-time entirely.
+- **pg_notify 8KB limit aborting writes**: the trigger now measures the
+  payload and falls back to a `truncated: true`, PK-only event past the
+  limit, wrapped in its own `EXCEPTION` handler so a notify failure can
+  never roll back the triggering write.
+- **No TLS/pool config**: `PostgresConfig.ssl`/`.pool` and
+  `MongoConfig.options` are passed through to the underlying drivers —
+  required by most managed database providers.
+- **Silent schema drift**: `CREATE TABLE IF NOT EXISTS` never alters an
+  existing table; `defineModel()` now diffs the live table against the
+  schema on `connect()` and warns instead of failing on the first query.
+- **Change streams that die forever**: MongoDB stream errors now trigger an
+  automatic restart with `resumeAfter: <last token>`; a resume attempt that
+  fails before observing anything new restarts fresh and warns that events
+  may have been missed.
 
 ### Transversal (parallel to any release) ✅ Done (except ESM)
 - GitHub Actions CI ✅ — unit suite on Node 18/20/22 + integration suite

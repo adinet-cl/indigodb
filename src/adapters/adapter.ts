@@ -42,7 +42,30 @@ export abstract class DatabaseAdapter extends EventEmitter {
     fn: (tx: TransactionContext) => Promise<R>
   ): Promise<R>;
 
+  /** Per-model redaction rules, registered by defineModel() implementations. */
+  private readonly redactions = new Map<string, readonly string[]>();
+
+  /** Registers the model's redact list so emitChange() strips those columns. */
+  protected trackRedaction(model: BaseModel<unknown>): void {
+    if (model.redactedColumns.length > 0) {
+      this.redactions.set(model.name, model.redactedColumns);
+    }
+  }
+
   protected emitChange(event: ChangeEvent): void {
+    const redact = this.redactions.get(event.model);
+    if (
+      redact &&
+      event.data !== null &&
+      typeof event.data === "object" &&
+      !Array.isArray(event.data)
+    ) {
+      const data = { ...(event.data as Record<string, unknown>) };
+      for (const column of redact) {
+        delete data[column];
+      }
+      event = { ...event, data };
+    }
     this.emit("change", event);
   }
 }

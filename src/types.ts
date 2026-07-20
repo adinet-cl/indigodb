@@ -39,6 +39,20 @@ export interface ModelOptions {
    * set on create(), refreshed on update(). Defaults to false.
    */
   timestamps?: boolean;
+  /**
+   * Emit real-time change events for this model. Defaults to true. When
+   * false, no Postgres trigger is created (an existing one is dropped) and
+   * no Mongo change stream is opened — changes to this model are never
+   * broadcast, in-process or over WebSocket.
+   */
+  broadcast?: boolean;
+  /**
+   * Column names stripped from every ChangeEvent for this model before it is
+   * emitted or broadcast — use it for password hashes, tokens, and anything
+   * else that must never reach real-time subscribers. Columns must exist in
+   * the schema. CRUD results are NOT redacted; this only affects change events.
+   */
+  redact?: string[];
 }
 
 export interface PostgresConfig {
@@ -50,6 +64,23 @@ export interface PostgresConfig {
   database?: string;
   /** Takes precedence over the individual connection fields when provided. */
   connectionString?: string;
+  /**
+   * TLS settings, passed through to the `pg` driver — `true`, or an object
+   * like `{ rejectUnauthorized: false }` / `{ ca: "..." }`. Required by most
+   * managed Postgres providers (RDS, Supabase, Neon, ...).
+   */
+  ssl?: boolean | Record<string, unknown>;
+  /** Connection-pool tuning, passed through to `pg.Pool`. */
+  pool?: {
+    /** Maximum pool size. pg default: 10. */
+    max?: number;
+    /** Minimum idle connections kept open. */
+    min?: number;
+    /** Close idle connections after this many ms. */
+    idleTimeoutMillis?: number;
+    /** Fail connection attempts after this many ms. */
+    connectionTimeoutMillis?: number;
+  };
 }
 
 export interface MongoConfig {
@@ -57,6 +88,8 @@ export interface MongoConfig {
   connectionString: string;
   /** Defaults to the database named in the connection string. */
   database?: string;
+  /** Extra driver options passed straight to the MongoClient constructor (tls, auth, pool sizing, ...). */
+  options?: Record<string, unknown>;
 }
 
 export type DatabaseConfig = PostgresConfig | MongoConfig;
@@ -86,4 +119,10 @@ export interface ChangeEvent<T = unknown> {
   model: string;
   operation: ChangeOperation;
   data: T;
+  /**
+   * Set by the PostgreSQL trigger when the full row exceeded the pg_notify
+   * payload limit (~8KB): `data` then carries only the primary key. Re-fetch
+   * the record if you need the rest.
+   */
+  truncated?: boolean;
 }

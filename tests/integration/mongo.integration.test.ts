@@ -205,4 +205,48 @@ describeIntegration("MongoDB integration", () => {
     await posts.deleteMany({ userId: authorId } as never);
     await model.delete((author as TestUser)._id);
   });
+
+  test("redact: sensitive columns never reach real-time subscribers", async () => {
+    interface Account {
+      _id?: unknown;
+      email: string;
+      passwordHash: string;
+    }
+    const ACCOUNTS_COLLECTION = "indigodb_it_accounts";
+    const accounts = await db.defineModel<Account>(
+      ACCOUNTS_COLLECTION,
+      {
+        email: { type: DataTypes.STRING },
+        passwordHash: { type: DataTypes.STRING },
+      },
+      { redact: ["passwordHash"] }
+    );
+
+    const events: ChangeEvent[] = [];
+    const ws = new WebSocket(`ws://localhost:${WS_PORT}`);
+    await new Promise((resolve, reject) => {
+      ws.on("open", resolve);
+      ws.on("error", reject);
+    });
+    ws.on("message", (raw) => {
+      const message = JSON.parse(raw.toString());
+      if (message.data.model === ACCOUNTS_COLLECTION) events.push(message.data);
+    });
+
+    const created = await accounts.create({
+      email: `redact-${Date.now()}@example.com`,
+      passwordHash: "s3cr3t-hash",
+    } as Partial<Account>);
+
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    ws.close();
+
+    expect(events.length).toBeGreaterThan(0);
+    for (const event of events) {
+      expect(event.data).not.toHaveProperty("passwordHash");
+    }
+    expect((created as Account).passwordHash).toBe("s3cr3t-hash");
+
+    await accounts.delete((created as Account)._id);
+  });
 });

@@ -33,6 +33,10 @@ export abstract class BaseModel<T> {
   public readonly schema: ModelSchema;
   public readonly primaryKey: string;
   public readonly timestamps: boolean;
+  /** False when the model opted out of real-time change events entirely. */
+  public readonly broadcastEnabled: boolean;
+  /** Columns stripped from every ChangeEvent for this model before emit/broadcast. */
+  public readonly redactedColumns: readonly string[];
   public readonly hooks: HookRegistry<T>;
   private readonly associations = new Map<string, AssociationDef>();
 
@@ -63,6 +67,16 @@ export abstract class BaseModel<T> {
         }
       : schema;
     this.assertValidSchema(this.schema);
+
+    this.broadcastEnabled = options.broadcast ?? true;
+    this.redactedColumns = options.redact ?? [];
+    for (const column of this.redactedColumns) {
+      if (!this.schema[column]) {
+        throw new ConfigurationError(
+          `Cannot redact unknown column "${column}" on model "${name}"`
+        );
+      }
+    }
 
     const declaredPrimaryKey = Object.entries(schema).find(
       ([, definition]) => definition.primaryKey

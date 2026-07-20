@@ -1,6 +1,6 @@
 {
   "name": "@adinet/indigodb",
-  "version": "3.1.0",
+  "version": "3.2.0",
   "description": "Lightweight ORM for PostgreSQL and MongoDB with real-time updates over WebSockets",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

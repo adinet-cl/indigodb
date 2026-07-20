@@ -21,6 +21,7 @@ IndigoDB is a lightweight ORM for Node.js that works against **either PostgreSQL
 - **Safe by default** — table/column identifiers are validated (anti SQL-injection) and all values are parameterized.
 - **Explicit lifecycle** — `connect()` / `close()` cleanly open and release every resource (pool, listener, change streams, WebSocket server).
 - **Injectable logger** — the library is silent unless you pass a `Logger`.
+- **Production-hardened real-time** — per-column redaction, opt-out per model, an oversized-row guard that can't abort your writes, and MongoDB change-stream auto-resume.
 
 ## Installation
 
@@ -164,14 +165,14 @@ const db = new IndigoDB({
 
 | Config field | Description |
 | --- | --- |
-| `database` | Discriminated by `type`. PostgreSQL: `{ type: "postgresql", host, port, user, password, database }` (or `connectionString`). MongoDB: `{ type: "mongodb", connectionString, database? }`. |
+| `database` | Discriminated by `type`. PostgreSQL: `{ type: "postgresql", host, port, user, password, database, ssl?, pool? }` (or `connectionString`). MongoDB: `{ type: "mongodb", connectionString, database?, options? }`. See [Production hardening](#production-hardening) for `ssl`/`pool`/`options`. |
 | `realtime` | Optional. `{ enabled: boolean, port?: number, authenticate? }` — defaults to port `8080`. When omitted or `enabled: false`, **no WebSocket server is started**. `authenticate(request)` (optional) runs per connection; return `false` to refuse it. |
 | `logger` | Optional `Logger`. Defaults to a no-op; pass `consoleLogger` (exported) or your own. |
 
 ### Methods
 
 - **`connect(): Promise<void>`** — connects the adapter (fails fast on bad credentials) and starts the WebSocket server if real-time is enabled.
-- **`defineModel<T>(name, schema, options?): Promise<Model<T>>`** — creates the table/collection (indexes, Postgres triggers) and resolves once it is ready. **Async** — always `await` it. `options.timestamps: true` adds managed `createdAt`/`updatedAt` columns.
+- **`defineModel<T>(name, schema, options?): Promise<Model<T>>`** — creates the table/collection (indexes, Postgres triggers) and resolves once it is ready. **Async** — always `await` it. `options.timestamps: true` adds managed `createdAt`/`updatedAt` columns; `options.broadcast`/`options.redact` control real-time — see [Production hardening](#production-hardening).
 - **`on("change", listener)`** — subscribe to `ChangeEvent`s in-process (inherited from `EventEmitter`).
 - **`transaction<R>(fn): Promise<R>`** — see [Transactions](#transactions).
 - **`close(): Promise<void>`** — stops the WebSocket server, closes change streams, and drains the connection pool / client.
@@ -411,6 +412,75 @@ import { MigrationRunner } from "@adinet/indigodb";
 const runner = new MigrationRunner(db, { directory: "./migrations" });
 await runner.up();
 ```
+
+## Production hardening
+
+### Redacting sensitive columns from real-time
+
+Change events broadcast the full row by default. Strip columns that must never leave the server (password hashes, tokens, ...):
+
+```typescript
+const Accounts = await db.defineModel<Account>(
+  "accounts",
+  {
+    id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+    email: { type: DataTypes.STRING },
+    passwordHash: { type: DataTypes.STRING },
+  },
+  { redact: ["passwordHash"] }
+);
+```
+
+`redact` only affects `ChangeEvent`s (in-process `db.on("change", ...)` and WebSocket broadcasts) — `create()`/`findAll()`/etc. results are never redacted. Redacting a column that isn't in the schema throws `ConfigurationError` at `defineModel()` time.
+
+### Opting a model out of real-time
+
+Set `broadcast: false` to skip creating a Postgres trigger / opening a Mongo change stream for a model entirely — useful for high-write tables nobody subscribes to:
+
+```typescript
+await db.defineModel("audit_log", schema, { broadcast: false });
+```
+
+### TLS and connection pooling (PostgreSQL)
+
+Most managed Postgres providers (RDS, Supabase, Neon, ...) require TLS:
+
+```typescript
+const db = new IndigoDB({
+  database: {
+    type: "postgresql",
+    connectionString: process.env.DATABASE_URL,
+    ssl: { rejectUnauthorized: false }, // or `true`, or a custom ssl config
+    pool: { max: 20, idleTimeoutMillis: 30_000 },
+  },
+});
+```
+
+`ssl` also applies to the dedicated `LISTEN` connection used for real-time; `pool` only tunes the query pool.
+
+### MongoDB driver options
+
+```typescript
+const db = new IndigoDB({
+  database: {
+    type: "mongodb",
+    connectionString: process.env.MONGO_URL,
+    options: { tls: true, maxPoolSize: 50 },
+  },
+});
+```
+
+### What happens when a row is too big for real-time
+
+PostgreSQL's `pg_notify` caps payloads around 8KB. A row that exceeds it no longer blocks the write: the trigger falls back to a **truncated** event — `{ ..., truncated: true, data: { <primaryKey>: value } }` — instead of throwing and aborting the INSERT/UPDATE/DELETE. Re-fetch the record if you need the rest. The notify path is also wrapped in its own error handler, so any real-time failure can never roll back the triggering write.
+
+### Schema drift detection
+
+`defineModel()` never alters an existing table — `CREATE TABLE IF NOT EXISTS` is a no-op once the table exists. If your schema has gained columns since the table was created, IndigoDB now logs a warning naming the missing columns and pointing at `indigodb-migrate` instead of failing silently until the first query breaks.
+
+### MongoDB change-stream resilience
+
+If a change stream errors (network blip, replica set election), the adapter automatically restarts it using the last-seen [resume token](https://www.mongodb.com/docs/manual/changeStreams/#resume-a-change-stream) so no events are missed. If the resume attempt itself fails before observing anything new — the token is presumably no longer in the oplog — it restarts fresh and logs a warning that some events may have been missed in between.
 
 ## Testing
 
