@@ -4,6 +4,32 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.1.0] - 2026-07-19
+
+Complete data types. Purely additive, no existing signature changes.
+
+### Added
+
+- Seven new `DataTypes`: `BIGINT`, `DOUBLE`, `DECIMAL`, `UUID`, `ENUM`,
+  `DATEONLY`, `BINARY` — bringing the total to 14, matching what
+  Sequelize/Prisma-style ORMs commonly offer.
+- New `ColumnDefinition` options: `length` (STRING → `VARCHAR(n)`),
+  `precision`/`scale` (DECIMAL → `NUMERIC(p, s)`), `values` (required for
+  ENUM — the allowed values).
+- ENUM values are validated on `create()`/`update()`/`createMany()`/
+  `updateMany()` on both backends, throwing `ValidationError` for anything
+  outside the declared `values` list. PostgreSQL additionally enforces it at
+  the database level with a `CHECK` constraint (values are escaped as SQL
+  string literals before being embedded).
+- Misconfigured columns (ENUM without `values`, `length`/`precision`/`scale`
+  on the wrong type, non-positive `length`) throw `ConfigurationError` at
+  `defineModel()` time instead of producing bad DDL or being silently
+  ignored.
+- MongoDB coercion: `BIGINT`/`DOUBLE` → `Number`, `DECIMAL` → `String`
+  (preserves exact precision — a JS `Number` would round money-style
+  values), `DATEONLY` → `Date`, `UUID`/`ENUM` → `String`, `BINARY` passes a
+  `Buffer` through unchanged.
+
 ## [3.0.0] - 2026-07-19
 
 Relations — the last planned item on the roadmap to a feature-complete

@@ -89,11 +89,23 @@ export class MongoModel<T> extends BaseModel<T> {
     if (value === null || value === undefined) return value;
     if (field === this.primaryKey) return this.toId(value);
     const type = this.schema[field]?.type;
-    if (type === "INTEGER" || type === "FLOAT") return Number(value);
+    if (
+      type === "INTEGER" ||
+      type === "BIGINT" ||
+      type === "FLOAT" ||
+      type === "DOUBLE"
+    ) {
+      return Number(value);
+    }
+    // Stored as a string to preserve exact precision (Mongo has no fixed-point
+    // decimal type suitable for money-style values; a JS Number would round).
+    if (type === "DECIMAL") return String(value);
     if (type === "BOOLEAN") return toBoolean(value);
-    if (type === "DATE" && !(value instanceof Date)) {
+    if ((type === "DATE" || type === "DATEONLY") && !(value instanceof Date)) {
       return new Date(value as string | number);
     }
+    if (type === "UUID" || type === "ENUM") return String(value);
+    // BINARY and JSON pass through unchanged (Buffer / plain object as given).
     return value;
   };
 

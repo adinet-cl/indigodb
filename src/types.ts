@@ -19,6 +19,14 @@ export interface ColumnDefinition {
    * MongoDB: documentation only, not enforced (no native FK constraints).
    */
   references?: { model: string; column?: string };
+  /** STRING only: VARCHAR(length). Defaults to 255. Must be a positive integer. */
+  length?: number;
+  /** DECIMAL only: NUMERIC(precision, scale). Omit both for an unconstrained NUMERIC. */
+  precision?: number;
+  /** DECIMAL only: paired with `precision`; the number of digits after the decimal point. */
+  scale?: number;
+  /** ENUM only: the allowed values. Required for ENUM columns; create()/update() reject anything else. */
+  values?: string[];
 }
 
 export interface ModelSchema {

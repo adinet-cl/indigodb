@@ -5,10 +5,10 @@ release plan toward a feature-complete version. Priorities were set with the
 project owner: transactions, relations, migrations and advanced real-time all
 matter — ordered below by dependency and cost.
 
-**Status: all four priority areas are done as of v3.0.0.** The only open
-items are the transversal tooling tasks at the bottom (dual ESM/CJS build,
-CI, linting, generated docs) — none of them block the library being usable
-end-to-end today.
+**Status: all four priority areas are done as of v3.0.0**, and the data-type
+gap flagged post-release was closed in v3.1.0. The only open item is the
+dual ESM/CJS build — it doesn't block the library being usable end-to-end
+today (Node ESM consumers already interop with the current CJS build).
 
 ## Where we are
 
@@ -26,14 +26,15 @@ end-to-end today.
 | **Migrations**: `MigrationRunner` + `indigodb-migrate` CLI (`up`/`down`/`status`/`create`), history tracked via `defineModel` on both backends | ✅ v2.4 |
 | **Advanced real-time**: filtered subscriptions (`{ type: "subscribe", models, where }`), pluggable `authenticate()`, dependency-free `@adinet/indigodb/client` | ✅ v2.5 |
 | **Relations**: `hasMany` / `belongsTo`, eager loading via `include` (batched `$in`, not JOIN/`$lookup`), `references` FK hints | ✅ v3.0 |
+| **Complete data types**: `BIGINT`, `DOUBLE`, `DECIMAL`, `UUID`, `ENUM`, `DATEONLY`, `BINARY` + `length`/`precision`/`scale`/`values` column options | ✅ v3.1 |
 | Mocked unit suite (no DB required) + opt-in integration suite | ✅ v2.0 |
 
 ## What's missing (the gaps)
 
-- **Dual ESM + CJS build** — deliberately deferred to v3.1 (owner's call):
-  Node ESM consumers already interop cleanly with the current CJS build, and
-  restructuring the build right before the first full release wasn't worth
-  the breakage risk. Everything else is done.
+- **Dual ESM + CJS build** — deliberately deferred (owner's call): Node ESM
+  consumers already interop cleanly with the current CJS build, and
+  restructuring the build wasn't worth the breakage risk this close to a
+  release. The only remaining transversal item.
 
 ## Release plan
 
@@ -78,6 +79,15 @@ end-to-end today.
   `findAll()`, not a native JOIN/`$lookup`. Simpler, identical on both
   backends, and avoids the row-multiplication JOINs cause with `hasMany`.
 
+### v3.1.0 — Data types completos ✅ Done
+- Seven new types: `BIGINT`, `DOUBLE`, `DECIMAL`, `UUID`, `ENUM`, `DATEONLY`,
+  `BINARY` — 14 total, matching what Sequelize/Prisma-style ORMs commonly offer.
+- Parameterized column options: `length` (STRING), `precision`/`scale`
+  (DECIMAL), `values` (ENUM, required). Misconfiguration throws
+  `ConfigurationError` at `defineModel()` time.
+- ENUM values validated on create/update (+ bulk variants) on both backends;
+  PostgreSQL additionally enforces it with a `CHECK` constraint.
+
 ### Transversal (parallel to any release) ✅ Done (except ESM)
 - GitHub Actions CI ✅ — unit suite on Node 18/20/22 + integration suite
   against real Postgres 16 and Mongo 7 (single-node replica set) containers
@@ -85,4 +95,4 @@ end-to-end today.
 - ESLint (flat config, typescript-eslint) + Prettier ✅ — `npm run lint`.
 - Generated API docs (typedoc) ✅ — `npm run docs`; published as CI artifact
   (GitHub Pages hosting left as an optional follow-up).
-- Dual ESM + CJS build — **deferred to v3.1** (see "What's missing").
+- Dual ESM + CJS build — **still deferred** (see "What's missing").
